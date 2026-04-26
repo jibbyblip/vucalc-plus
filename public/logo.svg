@@ -1,0 +1,16 @@
+<svg width="100" height="100" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="vuGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#8BA49A"/>
+      <stop offset="100%" stop-color="#3B6255"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="96" height="96" rx="22" fill="#1F3830"/>
+  <rect x="10" y="66" width="10" height="3.5" rx="1.75" fill="#CBDED3" fill-opacity="0.9"/>
+  <rect x="14" y="72" width="18" height="3.5" rx="1.75" fill="#CBDED3" fill-opacity="0.75"/>
+  <rect x="20" y="78" width="12" height="3.5" rx="1.75" fill="#CBDED3" fill-opacity="0.6"/>
+  <path d="M 30 30 L 50 76 L 70 30" stroke="url(#vuGrad)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M 70 30 L 70 66 Q 70 78 58 78 Q 50 78 50 70" stroke="url(#vuGrad)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="76" y="18" width="4.5" height="14" rx="2.25" fill="#CBDED3"/>
+  <rect x="71.25" y="22.75" width="14" height="4.5" rx="2.25" fill="#CBDED3"/>
+</svg>
