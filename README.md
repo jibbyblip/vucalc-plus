@@ -194,3 +194,4 @@ vucalc-app/
 **App icon looks wrong on home screen** — iOS caches icons aggressively. Remove from home screen, clear Safari cache (Settings → Safari → Clear History), then re-add.
 
 **Anything else** — let me know and I'll help debug.
+# vucalc-plus
