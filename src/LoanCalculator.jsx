@@ -195,7 +195,7 @@ export default function LoanCalculator() {
         className="border-b bg-white/70 backdrop-blur-sm"
         style={{ borderColor: C.cardBorder }}
       >
-        <div className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between gap-6 flex-wrap">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-5 flex items-center justify-between gap-4 sm:gap-6 flex-wrap">
           <div className="flex items-center gap-3">
             <Logo size={48} />
             <div>
@@ -220,10 +220,10 @@ export default function LoanCalculator() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-10">
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
         {/* Disclaimer: warmer, advisor tone */}
         <div
-          className="mb-6 rounded-lg px-5 py-4 text-sm leading-relaxed flex items-start gap-3"
+          className="mb-6 rounded-lg px-4 sm:px-5 py-3 sm:py-4 text-xs sm:text-sm leading-relaxed flex items-start gap-2 sm:gap-3"
           style={{
             backgroundColor: `${C.mint}60`,
             border: `1px solid ${C.sage}40`,
@@ -319,7 +319,7 @@ export default function LoanCalculator() {
       </main>
 
       <footer
-        className="max-w-5xl mx-auto px-6 py-8 text-xs text-center border-t mt-10"
+        className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 text-xs text-center border-t mt-8 sm:mt-10"
         style={{ color: C.mutedText, borderColor: C.cardBorder }}
       >
         <div className="flex items-center justify-center gap-2">
@@ -537,33 +537,55 @@ function StepIndicator({ step }) {
     { id: "next-steps", label: "Next steps" },
   ];
   const currentIdx = steps.findIndex((s) => s.id === step);
+
   return (
-    <div className="flex items-center gap-1.5 text-xs flex-wrap">
-      {steps.map((s, i) => (
-        <div key={s.id} className="flex items-center gap-1.5">
-          <div
-            className="w-6 h-6 rounded-full flex items-center justify-center font-medium text-[11px] transition"
-            style={{
-              backgroundColor: i <= currentIdx ? C.forest : C.bone,
-              color: i <= currentIdx ? "white" : C.mutedText,
-            }}
-          >
-            {i + 1}
-          </div>
-          <span
-            style={{
-              color: i === currentIdx ? C.forestDark : C.mutedText,
-              fontWeight: i === currentIdx ? 500 : 400,
-            }}
-          >
-            {s.label}
-          </span>
-          {i < steps.length - 1 && (
-            <span style={{ color: C.sage, margin: "0 2px" }}>·</span>
-          )}
+    <>
+      {/* Mobile: just numbered dots and the current label */}
+      <div className="flex sm:hidden items-center gap-2 text-xs">
+        <div className="flex items-center gap-1">
+          {steps.map((s, i) => (
+            <div
+              key={s.id}
+              className="w-2 h-2 rounded-full transition"
+              style={{
+                backgroundColor: i <= currentIdx ? C.forest : C.bone,
+              }}
+            />
+          ))}
         </div>
-      ))}
-    </div>
+        <span style={{ color: C.forestDark, fontWeight: 500 }}>
+          Step {currentIdx + 1} of {steps.length}
+        </span>
+      </div>
+
+      {/* Desktop: full breadcrumb with labels */}
+      <div className="hidden sm:flex items-center gap-1.5 text-xs flex-wrap">
+        {steps.map((s, i) => (
+          <div key={s.id} className="flex items-center gap-1.5">
+            <div
+              className="w-6 h-6 rounded-full flex items-center justify-center font-medium text-[11px] transition"
+              style={{
+                backgroundColor: i <= currentIdx ? C.forest : C.bone,
+                color: i <= currentIdx ? "white" : C.mutedText,
+              }}
+            >
+              {i + 1}
+            </div>
+            <span
+              style={{
+                color: i === currentIdx ? C.forestDark : C.mutedText,
+                fontWeight: i === currentIdx ? 500 : 400,
+              }}
+            >
+              {s.label}
+            </span>
+            {i < steps.length - 1 && (
+              <span style={{ color: C.sage, margin: "0 2px" }}>·</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -595,7 +617,7 @@ function InputStep({
       <div className="mb-8 flex items-start gap-4">
         <div className="flex-1">
           <h2
-            className="text-3xl md:text-4xl font-light tracking-tight mb-2"
+            className="text-2xl sm:text-3xl md:text-4xl font-light tracking-tight mb-2"
             style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
           >
             Let's start with <em style={{ color: C.sage }}>the basics</em>
@@ -736,7 +758,7 @@ function InputStep({
         <button
           onClick={onNext}
           disabled={!hasProperty || Number(proposedLoan) <= 0}
-          className="px-8 py-3 rounded-md text-sm font-medium shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md"
+          className="w-full sm:w-auto px-8 py-3 rounded-md text-sm font-medium shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md"
           style={{ backgroundColor: C.forest, color: "white" }}
         >
           Continue to structure →
@@ -754,7 +776,7 @@ function SelectStep({ onBack, onSelect }) {
     <div>
       <div className="mb-10 text-center">
         <h2
-          className="text-3xl md:text-4xl font-light tracking-tight mb-3"
+          className="text-2xl sm:text-3xl md:text-4xl font-light tracking-tight mb-3"
           style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
         >
           Which structure <em style={{ color: C.sage }}>suits you best</em>?
@@ -818,7 +840,7 @@ function StructureChoice({ title, subtitle, description, accent, icon, onSelect 
       onClick={onSelect}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className="text-left bg-white rounded-xl p-6 transition-all duration-300"
+      className="text-left bg-white rounded-xl p-5 sm:p-6 transition-all duration-300"
       style={{
         border: `2px solid ${hover ? a.hoverBorder : C.cardBorder}`,
         boxShadow: hover ? `0 8px 24px -8px ${C.forest}30` : `0 1px 2px ${C.forest}10`,
@@ -905,7 +927,7 @@ function ResultsStep({
     <div className="space-y-6">
       <div className="mb-6 flex items-baseline justify-between flex-wrap gap-3">
         <h2
-          className="text-3xl md:text-4xl font-light tracking-tight"
+          className="text-2xl sm:text-3xl md:text-4xl font-light tracking-tight"
           style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
         >
           {title}
@@ -923,7 +945,7 @@ function ResultsStep({
 
       {/* HERO CASH-OUT */}
       <div
-        className="relative rounded-2xl p-8 overflow-hidden"
+        className="relative rounded-2xl p-6 sm:p-8 overflow-hidden"
         style={{
           background: `linear-gradient(135deg, ${C.forest} 0%, ${C.forestDark} 50%, ${C.forestDarker} 100%)`,
           boxShadow: `0 20px 40px -20px ${C.forestDark}80`,
@@ -975,7 +997,7 @@ function ResultsStep({
           </div>
 
           <div
-            className="text-5xl md:text-6xl font-light tracking-tight mb-6 tabular-nums"
+            className="text-4xl sm:text-5xl md:text-6xl font-light tracking-tight mb-6 tabular-nums leading-none"
             style={{
               fontFamily: "'Playfair Display', Georgia, serif",
             }}
@@ -1105,7 +1127,7 @@ function ResultsStep({
 
       {/* UPFRONT COSTS */}
       <div
-        className="rounded-xl p-5"
+        className="rounded-xl p-4 sm:p-5"
         style={{
           backgroundColor: C.sand + "30",
           border: `1px solid ${C.sand}80`,
@@ -1138,7 +1160,7 @@ function ResultsStep({
 
       {/* EXIT STRATEGY */}
       <div
-        className="rounded-xl p-6 bg-white"
+        className="rounded-xl p-5 sm:p-6 bg-white"
         style={{ border: `1px solid ${C.cardBorder}` }}
       >
         <div className="flex items-center gap-2 mb-4">
@@ -1166,7 +1188,7 @@ function ResultsStep({
 
       {/* CTA */}
       <div
-        className="rounded-xl p-6 flex items-center justify-between flex-wrap gap-4"
+        className="rounded-xl p-5 sm:p-6 flex items-center justify-between flex-wrap gap-4"
         style={{
           background: `linear-gradient(135deg, ${C.forestDark} 0%, ${C.forest} 100%)`,
           color: "white",
@@ -1183,7 +1205,7 @@ function ResultsStep({
         </div>
         <button
           onClick={onProceed}
-          className="px-6 py-3 rounded-md text-sm font-medium transition hover:opacity-90"
+          className="w-full sm:w-auto px-6 py-3 rounded-md text-sm font-medium transition hover:opacity-90"
           style={{ backgroundColor: "white", color: C.forestDark }}
         >
           View document checklist →
@@ -1231,7 +1253,7 @@ function NextStepsStep({ onBack }) {
       <div className="mb-6 flex items-start justify-between flex-wrap gap-3">
         <div className="flex-1">
           <h2
-            className="text-3xl md:text-4xl font-light tracking-tight mb-2"
+            className="text-2xl sm:text-3xl md:text-4xl font-light tracking-tight mb-2"
             style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
           >
             A few things to <em style={{ color: C.sage }}>prepare</em>
@@ -1251,7 +1273,7 @@ function NextStepsStep({ onBack }) {
 
       {/* Contact block */}
       <div
-        className="rounded-xl p-6 relative overflow-hidden"
+        className="rounded-xl p-5 sm:p-6 relative overflow-hidden"
         style={{
           background: `linear-gradient(135deg, ${C.mint} 0%, ${C.sage}40 100%)`,
           border: `1px solid ${C.sage}80`,
@@ -1354,7 +1376,7 @@ function NextStepsStep({ onBack }) {
 
       {/* Site visit */}
       <div
-        className="rounded-xl p-5"
+        className="rounded-xl p-4 sm:p-5"
         style={{
           backgroundColor: C.mint + "50",
           border: `1px solid ${C.sage}60`,
@@ -1448,7 +1470,7 @@ function StructureCard({
 
   return (
     <div
-      className="bg-white rounded-xl p-6 relative overflow-hidden"
+      className="bg-white rounded-xl p-5 sm:p-6 relative overflow-hidden"
       style={{
         border: `1px solid ${C.cardBorder}`,
         borderTop: `4px solid ${a.top}`,
@@ -1473,7 +1495,7 @@ function StructureCard({
             Monthly payment
           </div>
           <div
-            className="text-4xl font-light tracking-tight tabular-nums"
+            className="text-3xl sm:text-4xl font-light tracking-tight tabular-nums leading-none"
             style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
           >
             {fmt(monthly)}
@@ -1526,50 +1548,51 @@ function ScheduleTable({ title, rows, fmt, onClose }) {
       style={{ border: `1px solid ${C.cardBorder}` }}
     >
       <div
-        className="flex items-center justify-between px-5 py-3"
+        className="flex items-center justify-between px-4 sm:px-5 py-3 gap-2"
         style={{
           borderBottom: `1px solid ${C.cardBorder}`,
           backgroundColor: C.bone + "80",
         }}
       >
         <h3
-          className="text-xs uppercase tracking-widest font-medium"
+          className="text-xs uppercase tracking-widest font-medium leading-tight"
           style={{ color: C.forest }}
         >
           {title}
         </h3>
         <button
           onClick={onClose}
-          className="text-xs transition hover:opacity-70"
+          className="text-xs transition hover:opacity-70 flex-shrink-0"
           style={{ color: C.mutedText }}
         >
           ✕ Close
         </button>
       </div>
-      <div className="max-h-96 overflow-y-auto">
-        <table className="w-full text-sm">
+      {/* Horizontal scroll on mobile so columns don't get squeezed */}
+      <div className="max-h-96 overflow-y-auto overflow-x-auto">
+        <table className="w-full text-xs sm:text-sm" style={{ minWidth: "560px" }}>
           <thead
-            className="text-xs uppercase tracking-wider sticky top-0"
+            className="text-[10px] sm:text-xs uppercase tracking-wider sticky top-0"
             style={{ backgroundColor: C.bone, color: C.mutedText }}
           >
             <tr>
-              <th className="text-left py-2 px-4 font-medium">Month</th>
-              <th className="text-right py-2 px-4 font-medium">Beginning</th>
-              <th className="text-right py-2 px-4 font-medium">Interest</th>
-              <th className="text-right py-2 px-4 font-medium">Principal</th>
-              <th className="text-right py-2 px-4 font-medium">Ending</th>
+              <th className="text-left py-2 px-3 sm:px-4 font-medium">Month</th>
+              <th className="text-right py-2 px-3 sm:px-4 font-medium">Beginning</th>
+              <th className="text-right py-2 px-3 sm:px-4 font-medium">Interest</th>
+              <th className="text-right py-2 px-3 sm:px-4 font-medium">Principal</th>
+              <th className="text-right py-2 px-3 sm:px-4 font-medium">Ending</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.month} style={{ borderTop: `1px solid ${C.cardBorder}40` }}>
-                <td className="py-1.5 px-4" style={{ color: C.mutedText }}>
+                <td className="py-1.5 px-3 sm:px-4" style={{ color: C.mutedText }}>
                   {r.month}
                 </td>
-                <td className="py-1.5 px-4 text-right tabular-nums">{fmt(r.begin)}</td>
-                <td className="py-1.5 px-4 text-right tabular-nums">{fmt(r.interest)}</td>
-                <td className="py-1.5 px-4 text-right tabular-nums">{fmt(r.principal)}</td>
-                <td className="py-1.5 px-4 text-right tabular-nums">{fmt(r.end)}</td>
+                <td className="py-1.5 px-3 sm:px-4 text-right tabular-nums">{fmt(r.begin)}</td>
+                <td className="py-1.5 px-3 sm:px-4 text-right tabular-nums">{fmt(r.interest)}</td>
+                <td className="py-1.5 px-3 sm:px-4 text-right tabular-nums">{fmt(r.principal)}</td>
+                <td className="py-1.5 px-3 sm:px-4 text-right tabular-nums">{fmt(r.end)}</td>
               </tr>
             ))}
           </tbody>
@@ -1612,7 +1635,7 @@ function ExitOption({ num, title, desc }) {
 function Card({ title, accent, icon, children }) {
   return (
     <div
-      className="rounded-xl p-5 bg-white"
+      className="rounded-xl p-4 sm:p-5 bg-white"
       style={{
         border: accent ? `2px solid ${C.forest}` : `1px solid ${C.cardBorder}`,
         boxShadow: accent ? `0 4px 12px ${C.forest}15` : "none",
