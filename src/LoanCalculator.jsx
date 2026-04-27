@@ -856,7 +856,7 @@ function SelectStep({ onBack, onSelect }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <StructureChoice
           title="Interest-Only"
-          subtitle="1-year tenure, reviewable"
+          subtitle="1-year tenure, with option to renew"
           description="Pay only the interest each month. The principal stays untouched until end of term, giving your business breathing room."
           accent="sage"
           icon={<ClockIcon color={C.sageDark} size={28} />}
@@ -1190,7 +1190,7 @@ function ResultsStep({
             {showIOnly && (
               <StructureCard
                 title="Interest-Only"
-                subtitle="1-year tenure, reviewable"
+                subtitle="1-year tenure, with option to renew"
                 accent="sage"
                 icon={<ClockIcon color={C.sageDark} size={22} />}
                 monthly={iOnlyMonthly}
@@ -1430,7 +1430,7 @@ function CompareView({
               Interest-Only
             </h3>
             <div className="text-xs" style={{ color: C.mutedText }}>
-              1-year tenure, reviewable
+              1-year tenure, with option to renew
             </div>
           </div>
 
@@ -1486,7 +1486,7 @@ function CompareView({
 
         <CompareRowLabel label="Tenure" />
         <div className="grid grid-cols-2">
-          <CompareCell value="1 year" sub="reviewable" small leftBorder noBottomBorder />
+          <CompareCell value="1 year" sub="renewable" small leftBorder noBottomBorder />
           <CompareCell value="5 years" sub="balloon" small noBottomBorder />
         </div>
 
@@ -1677,7 +1677,7 @@ function SnapshotStep({
     : selectedStructure === "both"
     ? "Interest-Only · 1-year tenure"
     : "Interest-Only · 1-year tenure";
-  const tenureLabel = isBalloon ? "5 years (balloon)" : "1 year (reviewable)";
+  const tenureLabel = isBalloon ? "5 years (balloon)" : "1 year (renewable)";
 
   return (
     <div className="space-y-6">
