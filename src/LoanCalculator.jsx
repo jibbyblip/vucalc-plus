@@ -22,6 +22,10 @@ export default function LoanCalculator() {
   const [step, setStep] = useState("input");
   const [selectedStructure, setSelectedStructure] = useState(null);
 
+  // Hidden constant: Vu's WhatsApp number, never displayed in the UI.
+  // Used only when building wa.me deep links on user action.
+  const VU_PHONE = "6591179540";
+
   // INPUTS
   const [propertyValue, setPropertyValue] = useState(null);
   const [ltvRatio, setLtvRatio] = useState(0.85);
@@ -34,7 +38,7 @@ export default function LoanCalculator() {
   const [interestRate, setInterestRate] = useState(0.0675);
   const [processingFeePct, setProcessingFeePct] = useState(0.02);
 
-  const [fireInsurance, setFireInsurance] = useState(1000);
+  const [fireInsurance, setFireInsurance] = useState(500);
   const [legalFee, setLegalFee] = useState(5000);
   const [valuationFee, setValuationFee] = useState(1000);
 
@@ -42,12 +46,12 @@ export default function LoanCalculator() {
   const BALLOON_YEAR = 5;
 
   const [showSchedule, setShowSchedule] = useState(null);
+  const [compareFeesOpen, setCompareFeesOpen] = useState(false);
 
   const n = (v) => (v == null || v === "" || isNaN(v) ? 0 : Number(v));
   const round2 = (x) => Math.round(x * 100) / 100;
-  const roundDownTo50k = (x) => Math.floor(x / 50000) * 50000;
 
-  // CPF projection (hidden)
+  // CPF projections per repayment structure
   const cpfProjected = (months) => {
     const principal = n(cpfPrincipal);
     const interest = (principal * 0.025 * months) / 12;
@@ -57,39 +61,31 @@ export default function LoanCalculator() {
   const cpfIOnly = useMemo(() => cpfProjected(12), [cpfPrincipal]);
   const cpfBalloon = useMemo(() => cpfProjected(3), [cpfPrincipal]);
 
-  // Current LTV = (Current Outstanding + CPF Utilisation) / Property Value
-  // CPF counts as a claim on the property, so we include it.
+  // Current LTV = (Outstanding + CPF) / Property Value
+  // CPF counts as a claim on the property since it's not redeemed.
   const currentLtv =
     n(propertyValue) > 0
       ? (n(outstanding) + n(cpfPrincipal)) / n(propertyValue)
       : 0;
 
-  // Tiered suggestion:
+  // Tiered suggestion (Option B):
   //   Current LTV 70% to 75%   -> suggest at 80% LTV
   //   Otherwise                -> suggest at 75% LTV
-  // Suggested loan = (Property × tier) − projected CPF for I-Only (12-month),
-  // i.e. the conservative projection. This ensures the suggested loan is safely
-  // within both structures' maximum capacity. The Balloon structure (3-month
-  // projection) will therefore have a little more headroom.
+  // The suggested loan is now Property × tier directly (without CPF deduction)
+  // because CPF is now shown explicitly on the Proposal page. This way the
+  // Proposed LTV displayed on Step 1 lands cleanly on the tier value.
   const suggestedLtvTier =
     currentLtv >= 0.70 && currentLtv <= 0.75 ? 0.80 : 0.75;
 
-  const suggestedLoan = Math.max(
-    0,
-    n(propertyValue) * suggestedLtvTier - cpfIOnly
-  );
+  const suggestedLoan = Math.max(0, n(propertyValue) * suggestedLtvTier);
 
   const effectiveProposedLoan =
     userEditedLoan && proposedLoan != null ? n(proposedLoan) : suggestedLoan;
 
-  // Proposed LTV on the landing page uses the 12-month (I-Only) projection,
-  // matching the conservative basis used for the suggested loan so both numbers
-  // stay in sync. Each structure's results page will show its own LTV using
-  // its own projection.
+  // Proposed LTV on the input page is now clean: just Loan / Property.
+  // CPF impact is shown as an explicit deduction on Step 3 (Proposal).
   const proposedLtv =
-    n(propertyValue) > 0
-      ? (effectiveProposedLoan + cpfIOnly) / n(propertyValue)
-      : 0;
+    n(propertyValue) > 0 ? effectiveProposedLoan / n(propertyValue) : 0;
 
   const handleProposedLoanChange = (v) => {
     setProposedLoan(v);
@@ -100,52 +96,75 @@ export default function LoanCalculator() {
     setProposedLoan(null);
   };
 
+  // The proposed loan as entered (before CPF deduction)
   const loan = effectiveProposedLoan;
+
+  // Per-structure applicable loan = proposed loan minus structure's CPF projection.
+  // This is what actually gets disbursed.
+  const applicableLoanIOnly = Math.max(0, loan - cpfIOnly);
+  const applicableLoanBalloon = Math.max(0, loan - cpfBalloon);
+
+  // Per-structure processing fee (capped at 3%, calculated on applicable loan)
   const cappedProcessingFeePct = Math.min(n(processingFeePct), 0.03);
-  const processingFee = round2(loan * cappedProcessingFeePct);
+  const processingFeeIOnly = round2(applicableLoanIOnly * cappedProcessingFeePct);
+  const processingFeeBalloon = round2(applicableLoanBalloon * cappedProcessingFeePct);
+
   const monthlyRate = n(interestRate) / 12;
 
-  const iOnlyMonthly = round2(loan * monthlyRate);
-  const iOnlyEndOfTerm = loan;
+  // Per-structure monthly servicing amounts
+  const iOnlyMonthly = round2(applicableLoanIOnly * monthlyRate);
+  const iOnlyEndOfTerm = applicableLoanIOnly;
 
   const amortMonths = n(amortYears) * 12;
   const balloonMonths = BALLOON_YEAR * 12;
 
   const balloonMonthly = round2(
     monthlyRate === 0 || amortMonths === 0
-      ? loan / (amortMonths || 1)
-      : (loan * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -amortMonths))
+      ? applicableLoanBalloon / (amortMonths || 1)
+      : (applicableLoanBalloon * monthlyRate) /
+        (1 - Math.pow(1 + monthlyRate, -amortMonths))
   );
 
   const balloonEndBalance = round2(
     monthlyRate === 0
-      ? loan - balloonMonthly * balloonMonths
-      : loan * Math.pow(1 + monthlyRate, balloonMonths) -
+      ? applicableLoanBalloon - balloonMonthly * balloonMonths
+      : applicableLoanBalloon * Math.pow(1 + monthlyRate, balloonMonths) -
           balloonMonthly *
             ((Math.pow(1 + monthlyRate, balloonMonths) - 1) / monthlyRate)
   );
 
-  const cashout = round2(
-    loan - n(outstanding) - processingFee - n(fireInsurance)
+  // Per-structure cashout = applicable loan − outstanding − processing − fire insurance
+  const cashoutIOnly = round2(
+    applicableLoanIOnly - n(outstanding) - processingFeeIOnly - n(fireInsurance)
   );
+  const cashoutBalloon = round2(
+    applicableLoanBalloon - n(outstanding) - processingFeeBalloon - n(fireInsurance)
+  );
+
+  // Single-structure view convenience: pick based on selectedStructure
+  const isBalloon = selectedStructure === "balloon";
+  const applicableLoan = isBalloon ? applicableLoanBalloon : applicableLoanIOnly;
+  const processingFee = isBalloon ? processingFeeBalloon : processingFeeIOnly;
+  const cashout = isBalloon ? cashoutBalloon : cashoutIOnly;
+  const cpfForStructure = isBalloon ? cpfBalloon : cpfIOnly;
 
   const iOnlySchedule = useMemo(() => {
     const rows = [];
     for (let m = 1; m <= 12; m++) {
       rows.push({
         month: m,
-        begin: loan,
+        begin: applicableLoanIOnly,
         interest: iOnlyMonthly,
-        principal: m === 12 ? loan : 0,
-        end: m === 12 ? 0 : loan,
+        principal: m === 12 ? applicableLoanIOnly : 0,
+        end: m === 12 ? 0 : applicableLoanIOnly,
       });
     }
     return rows;
-  }, [loan, iOnlyMonthly]);
+  }, [applicableLoanIOnly, iOnlyMonthly]);
 
   const balloonSchedule = useMemo(() => {
     const rows = [];
-    let balance = loan;
+    let balance = applicableLoanBalloon;
     for (let m = 1; m <= balloonMonths; m++) {
       const interest = round2(balance * monthlyRate);
       let principal = round2(balloonMonthly - interest);
@@ -164,7 +183,7 @@ export default function LoanCalculator() {
       balance = end;
     }
     return rows;
-  }, [loan, monthlyRate, balloonMonths, balloonMonthly]);
+  }, [applicableLoanBalloon, monthlyRate, balloonMonths, balloonMonthly]);
 
   const fmt = (x) => {
     if (x == null || x === "" || isNaN(x)) return "";
@@ -285,13 +304,25 @@ export default function LoanCalculator() {
         {step === "results" && (
           <ResultsStep
             selectedStructure={selectedStructure}
-            loan={loan}
+            proposedLoan={loan}
+            applicableLoan={applicableLoan}
+            applicableLoanIOnly={applicableLoanIOnly}
+            applicableLoanBalloon={applicableLoanBalloon}
+            cpfPrincipal={n(cpfPrincipal)}
+            cpfIOnly={cpfIOnly}
+            cpfBalloon={cpfBalloon}
+            cpfForStructure={cpfForStructure}
             outstanding={n(outstanding)}
             processingFee={processingFee}
+            processingFeeIOnly={processingFeeIOnly}
+            processingFeeBalloon={processingFeeBalloon}
             fireInsurance={n(fireInsurance)}
             legalFee={n(legalFee)}
             valuationFee={n(valuationFee)}
             cashout={cashout}
+            cashoutIOnly={cashoutIOnly}
+            cashoutBalloon={cashoutBalloon}
+            interestRate={n(interestRate)}
             iOnlyMonthly={iOnlyMonthly}
             iOnlyEndOfTerm={iOnlyEndOfTerm}
             balloonMonthly={balloonMonthly}
@@ -303,18 +334,53 @@ export default function LoanCalculator() {
             balloonMonths={balloonMonths}
             showSchedule={showSchedule}
             setShowSchedule={setShowSchedule}
+            compareFeesOpen={compareFeesOpen}
+            setCompareFeesOpen={setCompareFeesOpen}
             fmt={fmt}
+            fmtPct={fmtPct}
             onBack={() => setStep("select")}
             onRestart={() => {
               setStep("input");
               setShowSchedule(null);
             }}
+            onProceed={() => setStep("snapshot")}
+          />
+        )}
+
+        {step === "snapshot" && (
+          <SnapshotStep
+            selectedStructure={selectedStructure}
+            applicableLoanIOnly={applicableLoanIOnly}
+            applicableLoanBalloon={applicableLoanBalloon}
+            cashoutIOnly={cashoutIOnly}
+            cashoutBalloon={cashoutBalloon}
+            iOnlyMonthly={iOnlyMonthly}
+            balloonMonthly={balloonMonthly}
+            processingFeeIOnly={processingFeeIOnly}
+            processingFeeBalloon={processingFeeBalloon}
+            fireInsurance={n(fireInsurance)}
+            legalFee={n(legalFee)}
+            valuationFee={n(valuationFee)}
+            interestRate={n(interestRate)}
+            fmt={fmt}
+            onBack={() => setStep("results")}
             onProceed={() => setStep("next-steps")}
           />
         )}
 
         {step === "next-steps" && (
-          <NextStepsStep onBack={() => setStep("results")} />
+          <NextStepsStep
+            phone={VU_PHONE}
+            selectedStructure={selectedStructure}
+            applicableLoanIOnly={applicableLoanIOnly}
+            applicableLoanBalloon={applicableLoanBalloon}
+            cashoutIOnly={cashoutIOnly}
+            cashoutBalloon={cashoutBalloon}
+            iOnlyMonthly={iOnlyMonthly}
+            balloonMonthly={balloonMonthly}
+            fmt={fmt}
+            onBack={() => setStep("snapshot")}
+          />
         )}
       </main>
 
@@ -534,6 +600,7 @@ function StepIndicator({ step }) {
     { id: "input", label: "Your details" },
     { id: "select", label: "Structure" },
     { id: "results", label: "Proposal" },
+    { id: "snapshot", label: "Snapshot" },
     { id: "next-steps", label: "Next steps" },
   ];
   const currentIdx = steps.findIndex((s) => s.id === step);
@@ -903,25 +970,64 @@ function useAnimatedValue(target, duration = 1100) {
 // STEP 3: RESULTS
 // =========================================================
 function ResultsStep({
-  selectedStructure, loan, outstanding, processingFee, fireInsurance,
-  legalFee, valuationFee, cashout,
-  iOnlyMonthly, iOnlyEndOfTerm, balloonMonthly, balloonEndBalance,
-  amortYears, setAmortYears,
-  iOnlySchedule, balloonSchedule, balloonMonths,
-  showSchedule, setShowSchedule,
-  fmt, onBack, onRestart, onProceed,
+  selectedStructure,
+  proposedLoan,
+  applicableLoan,
+  applicableLoanIOnly,
+  applicableLoanBalloon,
+  cpfPrincipal,
+  cpfIOnly,
+  cpfBalloon,
+  cpfForStructure,
+  outstanding,
+  processingFee,
+  processingFeeIOnly,
+  processingFeeBalloon,
+  fireInsurance,
+  legalFee,
+  valuationFee,
+  cashout,
+  cashoutIOnly,
+  cashoutBalloon,
+  interestRate,
+  iOnlyMonthly,
+  iOnlyEndOfTerm,
+  balloonMonthly,
+  balloonEndBalance,
+  amortYears,
+  setAmortYears,
+  iOnlySchedule,
+  balloonSchedule,
+  balloonMonths,
+  showSchedule,
+  setShowSchedule,
+  compareFeesOpen,
+  setCompareFeesOpen,
+  fmt,
+  fmtPct,
+  onBack,
+  onRestart,
+  onProceed,
 }) {
-  const showIOnly = selectedStructure === "ionly" || selectedStructure === "both";
-  const showBalloon = selectedStructure === "balloon" || selectedStructure === "both";
+  const isCompare = selectedStructure === "both";
+  const showIOnly = selectedStructure === "ionly";
+  const showBalloon = selectedStructure === "balloon";
+  const hasCpf = cpfPrincipal > 0;
 
   const animCashout = useAnimatedValue(cashout, 1200);
 
-  const title =
-    selectedStructure === "both"
-      ? "Your options, side-by-side"
-      : selectedStructure === "ionly"
-      ? "Interest-Only · A year to breathe"
-      : "P+I Balloon · Steady progress";
+  const title = isCompare
+    ? "Compare both"
+    : showIOnly
+    ? "Interest-Only · A year to breathe"
+    : "P+I Balloon · Steady progress";
+
+  // CPF projection period label for the deduction block
+  const cpfPeriodLabel = isCompare
+    ? "· conservative (12-month)"
+    : showIOnly
+    ? "· 12-month projection"
+    : "· 3-month projection";
 
   return (
     <div className="space-y-6">
@@ -943,186 +1049,240 @@ function ResultsStep({
         </div>
       </div>
 
-      {/* HERO CASH-OUT */}
-      <div
-        className="relative rounded-2xl p-6 sm:p-8 overflow-hidden"
-        style={{
-          background: `linear-gradient(135deg, ${C.forest} 0%, ${C.forestDark} 50%, ${C.forestDarker} 100%)`,
-          boxShadow: `0 20px 40px -20px ${C.forestDark}80`,
-          color: "white",
-        }}
-      >
-        {/* Decorative blobs */}
+      {/* CPF DEDUCTION BLOCK — only shows when CPF > 0 */}
+      {hasCpf && (
         <div
-          className="absolute -top-20 -right-20 w-72 h-72 rounded-full blur-3xl opacity-30"
-          style={{ background: C.mint }}
-        />
-        <div
-          className="absolute -bottom-16 -left-16 w-56 h-56 rounded-full blur-3xl opacity-20"
-          style={{ background: C.sand }}
-        />
-        {/* Decorative SVG leaves in corner */}
-        <svg
-          className="absolute top-4 right-4 opacity-20"
-          width="120"
-          height="120"
-          viewBox="0 0 120 120"
-          fill="none"
+          className="rounded-xl p-4 sm:p-5"
+          style={{
+            backgroundColor: C.sand + "33",
+            border: `1px solid ${C.sand}99`,
+          }}
         >
-          <path
-            d="M100 20 C100 20 40 30 40 70 C40 85 55 95 70 95 C95 95 105 75 100 20 Z"
-            stroke={C.mint}
-            strokeWidth="1.5"
-            fill="none"
-          />
-          <path
-            d="M70 95 L50 65 M60 80 L75 70 M55 72 L68 62"
-            stroke={C.mint}
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-
-        <div className="relative">
-          <div className="flex items-baseline justify-between mb-3">
-            <span
-              className="text-xs uppercase tracking-widest"
-              style={{ color: C.mint }}
-            >
-              Your cash-out at disbursement
-            </span>
-            <span className="text-xs" style={{ color: C.mint + "CC" }}>
-              based on the proposed loan
-            </span>
+          <div className="flex items-center gap-2 mb-3">
+            <Sprout color={C.sandDark} size={18} />
+            <h3 className="text-xs uppercase tracking-widest font-medium" style={{ color: C.sandDark }}>
+              CPF projection · applicable loan calculation
+            </h3>
           </div>
+          <div className="space-y-1.5 text-sm">
+            <div className="flex justify-between">
+              <span style={{ color: C.bodyText }}>Proposed loan</span>
+              <span className="tabular-nums" style={{ color: C.bodyText }}>{fmt(proposedLoan)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span style={{ color: C.bodyText }}>
+                Less: CPF projection{" "}
+                <span className="italic text-xs" style={{ color: C.sandDark }}>
+                  {cpfPeriodLabel}
+                </span>
+              </span>
+              <span className="tabular-nums" style={{ color: C.bodyText }}>
+                −{fmt(cpfForStructure)}
+              </span>
+            </div>
+            <div
+              className="flex justify-between font-semibold pt-2 mt-1"
+              style={{ borderTop: `1px solid ${C.sand}`, color: C.forestDark }}
+            >
+              <span>Estimated Applicable Loan Amount</span>
+              <span className="tabular-nums">{fmt(applicableLoan)}</span>
+            </div>
+          </div>
+          <p className="text-xs mt-3 italic leading-relaxed" style={{ color: C.sandDark }}>
+            CPF utilisation is projected over your repayment period and reduces the disbursable loan amount.
+          </p>
+        </div>
+      )}
 
+      {/* COMPARE VIEW or SINGLE VIEW */}
+      {isCompare ? (
+        <CompareView
+          applicableLoanIOnly={applicableLoanIOnly}
+          applicableLoanBalloon={applicableLoanBalloon}
+          cashoutIOnly={cashoutIOnly}
+          cashoutBalloon={cashoutBalloon}
+          iOnlyMonthly={iOnlyMonthly}
+          balloonMonthly={balloonMonthly}
+          processingFeeIOnly={processingFeeIOnly}
+          processingFeeBalloon={processingFeeBalloon}
+          fireInsurance={fireInsurance}
+          interestRate={interestRate}
+          fmt={fmt}
+          fmtPct={fmtPct}
+          compareFeesOpen={compareFeesOpen}
+          setCompareFeesOpen={setCompareFeesOpen}
+        />
+      ) : (
+        <>
+          {/* HERO CASH-OUT */}
           <div
-            className="text-4xl sm:text-5xl md:text-6xl font-light tracking-tight mb-6 tabular-nums leading-none"
+            className="relative rounded-2xl p-6 sm:p-8 overflow-hidden"
             style={{
-              fontFamily: "'Playfair Display', Georgia, serif",
+              background: `linear-gradient(135deg, ${C.forest} 0%, ${C.forestDark} 50%, ${C.forestDarker} 100%)`,
+              boxShadow: `0 20px 40px -20px ${C.forestDark}80`,
+              color: "white",
             }}
           >
-            {fmt(animCashout)}
-          </div>
+            <div
+              className="absolute -top-20 -right-20 w-72 h-72 rounded-full blur-3xl opacity-30"
+              style={{ background: C.mint }}
+            />
+            <div
+              className="absolute -bottom-16 -left-16 w-56 h-56 rounded-full blur-3xl opacity-20"
+              style={{ background: C.sand }}
+            />
+            <svg
+              className="absolute top-4 right-4 opacity-20"
+              width="120"
+              height="120"
+              viewBox="0 0 120 120"
+              fill="none"
+            >
+              <path
+                d="M100 20 C100 20 40 30 40 70 C40 85 55 95 70 95 C95 95 105 75 100 20 Z"
+                stroke={C.mint}
+                strokeWidth="1.5"
+                fill="none"
+              />
+              <path
+                d="M70 95 L50 65 M60 80 L75 70 M55 72 L68 62"
+                stroke={C.mint}
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
 
-          <div
-            className="grid grid-cols-[1fr_auto] gap-x-8 gap-y-2 text-sm pt-4"
-            style={{ borderTop: `1px solid ${C.mint}30` }}
-          >
-            <div style={{ color: C.mint }}>Proposed loan</div>
-            <div className="text-right tabular-nums">{fmt(loan)}</div>
-            <div style={{ color: C.mint }}>Less: current outstanding</div>
-            <div className="text-right tabular-nums">−{fmt(outstanding)}</div>
-            <div style={{ color: C.mint }}>Less: processing fee</div>
-            <div className="text-right tabular-nums">−{fmt(processingFee)}</div>
-            <div style={{ color: C.mint }}>Less: fire insurance</div>
-            <div className="text-right tabular-nums">−{fmt(fireInsurance)}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Structure cards */}
-      <div
-        className={`grid gap-5 ${
-          selectedStructure === "both" ? "grid-cols-1 md:grid-cols-2" : "grid-cols-1"
-        }`}
-      >
-        {showIOnly && (
-          <StructureCard
-            title="Interest-Only"
-            subtitle="1-year tenure, reviewable"
-            accent="sage"
-            icon={<ClockIcon color={C.sageDark} size={22} />}
-            monthly={iOnlyMonthly}
-            endOfTerm={iOnlyEndOfTerm}
-            endOfTermLabel="Principal due at end of year 1"
-            description="Interest-only monthly payments keep your outgoings light. The full principal is due when the term ends."
-            onShowSchedule={() => setShowSchedule(showSchedule === "ionly" ? null : "ionly")}
-            scheduleOpen={showSchedule === "ionly"}
-            fmt={fmt}
-            rationale={
-              <>
-                <p className="mb-2" style={{ color: C.forestDark, fontWeight: 500 }}>
-                  Why you might lean toward this
-                </p>
-                <p style={{ color: C.bodyText }}>
-                  If your business expects a liquidity event within the next year, perhaps a large contract, an
-                  asset sale, or a refinancing window, pick this approach will keep monthly obligations light
-                  and protect your working capital.
-                </p>
-              </>
-            }
-          />
-        )}
-        {showBalloon && (
-          <StructureCard
-            title="P+I Balloon"
-            subtitle={`${amortYears}-year amortisation, balloon at year 5`}
-            accent="forest"
-            icon={<TreeIcon color={C.forest} size={22} />}
-            monthly={balloonMonthly}
-            endOfTerm={balloonEndBalance}
-            endOfTermLabel="Balloon due at end of year 5"
-            description={`Principal + Interest monthly on a ${amortYears}-year schedule. Each payment reduces principal. The remaining balance is due as a balloon at year 5.`}
-            onShowSchedule={() => setShowSchedule(showSchedule === "balloon" ? null : "balloon")}
-            scheduleOpen={showSchedule === "balloon"}
-            fmt={fmt}
-            extraInput={
-              <div className="pt-3" style={{ borderTop: `1px dashed ${C.cardBorder}` }}>
-                <label className="block">
-                  <div className="text-xs mb-1" style={{ color: C.mutedText }}>
-                    Amortisation tenure (years)
-                  </div>
-                  <input
-                    type="number"
-                    value={amortYears ?? ""}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!isNaN(v) && v > 0 && v <= 30) setAmortYears(v);
-                    }}
-                    min={1}
-                    max={30}
-                    className="w-full py-1.5 px-2 rounded-md text-sm outline-none bg-white"
-                    style={{ border: `1px solid ${C.cardBorder}` }}
-                  />
-                </label>
-                <p className="text-xs mt-1 italic" style={{ color: C.mutedText }}>
-                  Up to 30 years. Balloon is fixed at year 5.
-                </p>
+            <div className="relative">
+              <div className="flex items-baseline justify-between mb-3">
+                <span className="text-xs uppercase tracking-widest" style={{ color: C.mint }}>
+                  Your cash-out at disbursement
+                </span>
+                <span className="text-xs" style={{ color: C.mint + "CC" }}>
+                  indicative
+                </span>
               </div>
-            }
-            rationale={
-              <>
-                <p className="mb-2" style={{ color: C.forestDark, fontWeight: 500 }}>
-                  Why you might lean toward this
-                </p>
-                <p style={{ color: C.bodyText }}>
-                  If you'd rather chip away at the debt consistently, P+I builds equity with every
-                  payment. By year 5, a meaningful portion of the principal is already paid down,
-                  giving you a smaller balloon to refinance and a stronger standing when you approach
-                  banks.
-                </p>
-              </>
-            }
-          />
-        )}
-      </div>
 
-      {showSchedule === "ionly" && (
-        <ScheduleTable
-          title="Interest-Only · 12-month payment schedule"
-          rows={iOnlySchedule}
-          fmt={fmt}
-          onClose={() => setShowSchedule(null)}
-        />
-      )}
-      {showSchedule === "balloon" && (
-        <ScheduleTable
-          title={`P+I Balloon · ${balloonMonths}-month amortisation schedule`}
-          rows={balloonSchedule}
-          fmt={fmt}
-          onClose={() => setShowSchedule(null)}
-        />
+              <div
+                className="text-4xl sm:text-5xl md:text-6xl font-light tracking-tight mb-6 tabular-nums leading-none"
+                style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+              >
+                {fmt(animCashout)}
+              </div>
+
+              <div
+                className="grid grid-cols-[1fr_auto] gap-x-8 gap-y-2 text-sm pt-4"
+                style={{ borderTop: `1px solid ${C.mint}30` }}
+              >
+                <div style={{ color: C.mint }}>Estimated Applicable Loan</div>
+                <div className="text-right tabular-nums">{fmt(applicableLoan)}</div>
+                <div style={{ color: C.mint }}>Less: current outstanding</div>
+                <div className="text-right tabular-nums">−{fmt(outstanding)}</div>
+                <div style={{ color: C.mint }}>Less: processing fee</div>
+                <div className="text-right tabular-nums">−{fmt(processingFee)}</div>
+                <div style={{ color: C.mint }}>Less: fire insurance</div>
+                <div className="text-right tabular-nums">−{fmt(fireInsurance)}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Single-structure card */}
+          <div className="grid gap-5 grid-cols-1">
+            {showIOnly && (
+              <StructureCard
+                title="Interest-Only"
+                subtitle="1-year tenure, reviewable"
+                accent="sage"
+                icon={<ClockIcon color={C.sageDark} size={22} />}
+                monthly={iOnlyMonthly}
+                endOfTerm={iOnlyEndOfTerm}
+                endOfTermLabel="Principal due at end of year 1"
+                description="Interest-only monthly payments keep your outgoings light. The full principal is due when the term ends."
+                onShowSchedule={() => setShowSchedule(showSchedule === "ionly" ? null : "ionly")}
+                scheduleOpen={showSchedule === "ionly"}
+                fmt={fmt}
+                rationale={
+                  <>
+                    <p className="mb-2" style={{ color: C.forestDark, fontWeight: 500 }}>
+                      Why pick Interest-Only
+                    </p>
+                    <p style={{ color: C.bodyText }}>
+                      Best if you expect a liquidity event within the next year, perhaps a contract,
+                      asset sale, or refinancing window. Light monthly outgoings protect your working
+                      capital while you wait.
+                    </p>
+                  </>
+                }
+              />
+            )}
+            {showBalloon && (
+              <StructureCard
+                title="P+I Balloon"
+                subtitle={`${amortYears}-year amortisation, balloon at year 5`}
+                accent="forest"
+                icon={<TreeIcon color={C.forest} size={22} />}
+                monthly={balloonMonthly}
+                endOfTerm={balloonEndBalance}
+                endOfTermLabel="Balloon due at end of year 5"
+                description={`Principal + Interest monthly on a ${amortYears}-year schedule. Each payment reduces principal. The remaining balance is due as a balloon at year 5.`}
+                onShowSchedule={() => setShowSchedule(showSchedule === "balloon" ? null : "balloon")}
+                scheduleOpen={showSchedule === "balloon"}
+                fmt={fmt}
+                extraInput={
+                  <div className="pt-3" style={{ borderTop: `1px dashed ${C.cardBorder}` }}>
+                    <label className="block">
+                      <div className="text-xs mb-1" style={{ color: C.mutedText }}>
+                        Amortisation tenure (years)
+                      </div>
+                      <input
+                        type="number"
+                        value={amortYears ?? ""}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          if (!isNaN(v) && v > 0 && v <= 30) setAmortYears(v);
+                        }}
+                        min={1}
+                        max={30}
+                        className="w-full py-1.5 px-2 rounded-md text-sm outline-none bg-white"
+                        style={{ border: `1px solid ${C.cardBorder}` }}
+                      />
+                    </label>
+                    <p className="text-xs mt-1 italic" style={{ color: C.mutedText }}>
+                      Up to 30 years. Balloon is fixed at year 5.
+                    </p>
+                  </div>
+                }
+                rationale={
+                  <>
+                    <p className="mb-2" style={{ color: C.forestDark, fontWeight: 500 }}>
+                      Why pick P+I Balloon
+                    </p>
+                    <p style={{ color: C.bodyText }}>
+                      Best if you'd rather chip away at the debt steadily. Each payment builds equity,
+                      leaving a smaller balloon at year 5 and a stronger refinancing position.
+                    </p>
+                  </>
+                }
+              />
+            )}
+          </div>
+
+          {showSchedule === "ionly" && (
+            <ScheduleTable
+              title="Interest-Only · 12-month payment schedule"
+              rows={iOnlySchedule}
+              fmt={fmt}
+              onClose={() => setShowSchedule(null)}
+            />
+          )}
+          {showSchedule === "balloon" && (
+            <ScheduleTable
+              title={`P+I Balloon · ${balloonMonths}-month amortisation schedule`}
+              rows={balloonSchedule}
+              fmt={fmt}
+              onClose={() => setShowSchedule(null)}
+            />
+          )}
+        </>
       )}
 
       {/* UPFRONT COSTS */}
@@ -1186,7 +1346,7 @@ function ResultsStep({
         </div>
       </div>
 
-      {/* CTA */}
+      {/* CTA — view snapshot */}
       <div
         className="rounded-xl p-5 sm:p-6 flex items-center justify-between flex-wrap gap-4"
         style={{
@@ -1197,9 +1357,9 @@ function ResultsStep({
         <div className="flex items-center gap-4">
           <CheckCircleIcon color={C.mint} size={28} />
           <div>
-            <h3 className="text-lg font-medium mb-0.5">Ready to take the next step?</h3>
+            <h3 className="text-lg font-medium mb-0.5">Ready for your snapshot?</h3>
             <p className="text-sm" style={{ color: C.mint }}>
-              Here's what we'll need to get your application underway.
+              Review the one-screen summary you can share or screenshot.
             </p>
           </div>
         </div>
@@ -1208,7 +1368,7 @@ function ResultsStep({
           className="w-full sm:w-auto px-6 py-3 rounded-md text-sm font-medium transition hover:opacity-90"
           style={{ backgroundColor: "white", color: C.forestDark }}
         >
-          View document checklist →
+          View Loan Snapshot →
         </button>
       </div>
     </div>
@@ -1216,9 +1376,540 @@ function ResultsStep({
 }
 
 // =========================================================
+// COMPARE VIEW — two-column metrics table with collapsible fees
+// =========================================================
+function CompareView({
+  applicableLoanIOnly,
+  applicableLoanBalloon,
+  cashoutIOnly,
+  cashoutBalloon,
+  iOnlyMonthly,
+  balloonMonthly,
+  processingFeeIOnly,
+  processingFeeBalloon,
+  fireInsurance,
+  interestRate,
+  fmt,
+  fmtPct,
+  compareFeesOpen,
+  setCompareFeesOpen,
+}) {
+  return (
+    <div className="space-y-5">
+      {/* TWO-COLUMN METRICS TABLE */}
+      <div
+        className="rounded-2xl overflow-hidden bg-white"
+        style={{ border: `1px solid ${C.cardBorder}` }}
+      >
+        {/* Headers */}
+        <div className="grid grid-cols-2">
+          <div
+            className="p-4 sm:p-5 text-center"
+            style={{
+              borderBottom: `2px solid ${C.sage}`,
+              borderRight: `1px solid ${C.cardBorder}99`,
+              background: `linear-gradient(180deg, ${C.mint}40 0%, ${C.mint}10 100%)`,
+            }}
+          >
+            <div
+              className="w-9 h-9 rounded-full mx-auto mb-2 flex items-center justify-center"
+              style={{ backgroundColor: "rgba(255,255,255,0.7)" }}
+            >
+              <ClockIcon color={C.sageDark} size={20} />
+            </div>
+            <div
+              className="text-xs uppercase tracking-wider font-medium mb-0.5"
+              style={{ color: C.sageDark }}
+            >
+              Option A
+            </div>
+            <h3
+              className="text-lg sm:text-xl font-normal mb-0.5"
+              style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+            >
+              Interest-Only
+            </h3>
+            <div className="text-xs" style={{ color: C.mutedText }}>
+              1-year tenure, reviewable
+            </div>
+          </div>
+
+          <div
+            className="p-4 sm:p-5 text-center"
+            style={{
+              borderBottom: `2px solid ${C.forest}`,
+              background: `linear-gradient(180deg, ${C.mint}40 0%, ${C.mint}10 100%)`,
+            }}
+          >
+            <div
+              className="w-9 h-9 rounded-full mx-auto mb-2 flex items-center justify-center"
+              style={{ backgroundColor: "rgba(255,255,255,0.7)" }}
+            >
+              <TreeIcon color={C.forest} size={20} />
+            </div>
+            <div
+              className="text-xs uppercase tracking-wider font-medium mb-0.5"
+              style={{ color: C.forest }}
+            >
+              Option B
+            </div>
+            <h3
+              className="text-lg sm:text-xl font-normal mb-0.5"
+              style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+            >
+              P+I Balloon
+            </h3>
+            <div className="text-xs" style={{ color: C.mutedText }}>
+              Balloon at year 5
+            </div>
+          </div>
+        </div>
+
+        {/* Rows */}
+        <CompareRowLabel label="Cash-out at disbursement" />
+        <div className="grid grid-cols-2">
+          <CompareCell value={fmt(cashoutIOnly)} variant="cashout" leftBorder />
+          <CompareCell value={fmt(cashoutBalloon)} variant="cashout" />
+        </div>
+
+        <CompareRowLabel label="Monthly servicing" />
+        <div className="grid grid-cols-2">
+          <CompareCell value={fmt(iOnlyMonthly)} sub="interest only" leftBorder />
+          <CompareCell value={fmt(balloonMonthly)} sub="P + I" />
+        </div>
+
+        <CompareRowLabel label="Interest rate" />
+        <div className="grid grid-cols-2">
+          <CompareCell value={fmtPct(interestRate)} sub="p.a." small leftBorder />
+          <CompareCell value={fmtPct(interestRate)} sub="p.a." small />
+        </div>
+
+        <CompareRowLabel label="Tenure" />
+        <div className="grid grid-cols-2">
+          <CompareCell value="1 year" sub="reviewable" small leftBorder noBottomBorder />
+          <CompareCell value="5 years" sub="balloon" small noBottomBorder />
+        </div>
+
+        {/* Fees toggle */}
+        <button
+          onClick={() => setCompareFeesOpen(!compareFeesOpen)}
+          className="w-full py-2.5 px-4 text-xs transition hover:bg-stone-50"
+          style={{
+            borderTop: `1px solid ${C.cardBorder}99`,
+            color: C.mutedText,
+            backgroundColor: C.lightBg + "80",
+          }}
+        >
+          {compareFeesOpen ? "Hide fees & charges ▴" : "Show fees & charges ▾"}
+        </button>
+
+        {/* Fees detail */}
+        {compareFeesOpen && (
+          <div
+            className="px-4 py-3"
+            style={{
+              borderTop: `1px solid ${C.cardBorder}99`,
+              backgroundColor: C.lightBg + "60",
+            }}
+          >
+            <div
+              className="text-[10px] uppercase tracking-wider text-center mb-1"
+              style={{ color: C.mutedText }}
+            >
+              Processing fee
+            </div>
+            <div className="grid grid-cols-2 mb-3">
+              <div
+                className="text-center text-xs tabular-nums font-medium"
+                style={{ color: C.bodyText, borderRight: `1px solid ${C.cardBorder}80` }}
+              >
+                {fmt(processingFeeIOnly)}
+              </div>
+              <div className="text-center text-xs tabular-nums font-medium" style={{ color: C.bodyText }}>
+                {fmt(processingFeeBalloon)}
+              </div>
+            </div>
+            <div
+              className="text-[10px] uppercase tracking-wider text-center mb-1"
+              style={{ color: C.mutedText }}
+            >
+              Fire insurance
+            </div>
+            <div className="grid grid-cols-2">
+              <div
+                className="text-center text-xs tabular-nums font-medium"
+                style={{ color: C.bodyText, borderRight: `1px solid ${C.cardBorder}80` }}
+              >
+                {fmt(fireInsurance)}
+              </div>
+              <div className="text-center text-xs tabular-nums font-medium" style={{ color: C.bodyText }}>
+                {fmt(fireInsurance)}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* RATIONALE CARDS — equal weight */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div
+          className="rounded-xl p-4 sm:p-5 bg-white"
+          style={{ border: `1px solid ${C.cardBorder}`, borderTop: `3px solid ${C.sage}` }}
+        >
+          <div
+            className="text-xs uppercase tracking-wider font-medium mb-1"
+            style={{ color: C.sageDark }}
+          >
+            Why pick Interest-Only
+          </div>
+          <h4
+            className="text-base font-normal mb-2"
+            style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+          >
+            A year to breathe
+          </h4>
+          <p className="text-sm leading-relaxed" style={{ color: C.bodyText }}>
+            Best if you expect a liquidity event within the next year, perhaps a contract, asset sale,
+            or refinancing window. Light monthly outgoings protect your working capital while you wait.
+          </p>
+        </div>
+
+        <div
+          className="rounded-xl p-4 sm:p-5 bg-white"
+          style={{ border: `1px solid ${C.cardBorder}`, borderTop: `3px solid ${C.forest}` }}
+        >
+          <div
+            className="text-xs uppercase tracking-wider font-medium mb-1"
+            style={{ color: C.forest }}
+          >
+            Why pick P+I Balloon
+          </div>
+          <h4
+            className="text-base font-normal mb-2"
+            style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+          >
+            Steady progress
+          </h4>
+          <p className="text-sm leading-relaxed" style={{ color: C.bodyText }}>
+            Best if you'd rather chip away at the debt steadily. Each payment builds equity, leaving a
+            smaller balloon at year 5 and a stronger refinancing position.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CompareRowLabel({ label }) {
+  return (
+    <div
+      className="px-4 pt-2.5 pb-1 text-center text-[10px] uppercase tracking-wider"
+      style={{
+        color: C.mutedText,
+        backgroundColor: C.lightBg + "80",
+      }}
+    >
+      {label}
+    </div>
+  );
+}
+
+function CompareCell({ value, sub, variant, small, leftBorder, noBottomBorder }) {
+  const numStyle = {
+    fontFamily: "'Playfair Display', Georgia, serif",
+    fontSize: small ? "16px" : "22px",
+    color: variant === "cashout" ? C.forest : C.forestDark,
+    fontWeight: variant === "cashout" ? 500 : 400,
+    lineHeight: 1.1,
+  };
+  return (
+    <div
+      className="px-3 sm:px-4 pt-1.5 pb-3 text-center"
+      style={{
+        borderRight: leftBorder ? `1px solid ${C.cardBorder}80` : "none",
+        borderBottom: noBottomBorder ? "none" : `1px solid ${C.cardBorder}80`,
+      }}
+    >
+      <div className="tabular-nums" style={numStyle}>
+        {value}
+      </div>
+      {sub && (
+        <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =========================================================
 // STEP 4: NEXT STEPS
 // =========================================================
-function NextStepsStep({ onBack }) {
+// =========================================================
+// STEP 4: SNAPSHOT (single-screen quotation card)
+// =========================================================
+function SnapshotStep({
+  selectedStructure,
+  applicableLoanIOnly,
+  applicableLoanBalloon,
+  cashoutIOnly,
+  cashoutBalloon,
+  iOnlyMonthly,
+  balloonMonthly,
+  processingFeeIOnly,
+  processingFeeBalloon,
+  fireInsurance,
+  legalFee,
+  valuationFee,
+  interestRate,
+  fmt,
+  onBack,
+  onProceed,
+}) {
+  // For "Compare both", default to Interest-Only view in the snapshot
+  const isBalloon = selectedStructure === "balloon";
+  const aLoan = isBalloon ? applicableLoanBalloon : applicableLoanIOnly;
+  const cashout = isBalloon ? cashoutBalloon : cashoutIOnly;
+  const monthly = isBalloon ? balloonMonthly : iOnlyMonthly;
+  const procFee = isBalloon ? processingFeeBalloon : processingFeeIOnly;
+  const structureLabel = isBalloon
+    ? "P+I Balloon · Year 5"
+    : selectedStructure === "both"
+    ? "Interest-Only · 1-year tenure"
+    : "Interest-Only · 1-year tenure";
+  const tenureLabel = isBalloon ? "5 years (balloon)" : "1 year (reviewable)";
+
+  return (
+    <div className="space-y-6">
+      <div className="text-center mb-2">
+        <h2
+          className="text-2xl sm:text-3xl md:text-4xl font-light tracking-tight mb-2"
+          style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+        >
+          Your <em style={{ color: C.sage }}>quote at a glance</em>
+        </h2>
+        <p className="text-sm" style={{ color: C.mutedText }}>
+          Screenshot or share. This is the snapshot to walk away with.
+        </p>
+      </div>
+
+      {/* THE SNAPSHOT CARD — designed to fit one mobile screen */}
+      <div
+        className="rounded-2xl bg-white p-5 sm:p-6 mx-auto"
+        style={{ border: `1px solid ${C.cardBorder}`, maxWidth: "420px" }}
+      >
+        {/* Header */}
+        <div
+          className="text-center pb-3 mb-4"
+          style={{ borderBottom: `1px dashed ${C.cardBorder}` }}
+        >
+          <div
+            className="text-[10px] uppercase tracking-widest mb-1"
+            style={{ color: C.sage }}
+          >
+            VuCalc+ · Indicative quotation
+          </div>
+          <h3
+            className="text-base sm:text-lg font-normal"
+            style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+          >
+            {structureLabel}
+          </h3>
+        </div>
+
+        {/* Hero numbers */}
+        <div className="space-y-2.5 mb-4">
+          <SnapshotHeroItem
+            label="Estimated Applicable Loan"
+            value={fmt(aLoan)}
+            primary
+          />
+          <SnapshotHeroItem label="Cash-out at disbursement" value={fmt(cashout)} />
+          <SnapshotHeroItem label="Monthly payment" value={fmt(monthly)} />
+        </div>
+
+        {/* Terms */}
+        <div
+          className="text-[10px] uppercase tracking-widest mb-1.5"
+          style={{ color: C.sage }}
+        >
+          Terms
+        </div>
+        <div className="text-xs space-y-1 mb-4">
+          <SnapshotMiniRow label="Interest rate" value={`${(interestRate * 100).toFixed(2)}% p.a.`} />
+          <SnapshotMiniRow label="Tenure" value={tenureLabel} />
+          <SnapshotMiniRow label="Processing fee" value={fmt(procFee)} />
+          <SnapshotMiniRow label="Fire insurance" value={fmt(fireInsurance)} last />
+        </div>
+
+        {/* Third-party fees */}
+        <div
+          className="text-[10px] uppercase tracking-widest mb-1.5"
+          style={{ color: C.sage }}
+        >
+          Third-party fees
+        </div>
+        <div className="text-xs space-y-1">
+          <SnapshotMiniRow label="Valuation fee" value={fmt(valuationFee)} />
+          <SnapshotMiniRow label="Legal fee" value={fmt(legalFee)} last />
+        </div>
+        <p
+          className="text-xs italic leading-relaxed mt-3 pt-3"
+          style={{ color: C.mutedText, borderTop: `1px dashed ${C.cardBorder}` }}
+        >
+          Indicative third-party fees such as valuation and legal are payable by the client before
+          loan disbursement.
+        </p>
+      </div>
+
+      {/* Primary CTA */}
+      <div className="mx-auto" style={{ maxWidth: "420px" }}>
+        <button
+          onClick={onProceed}
+          className="w-full px-6 py-3 rounded-md text-sm font-medium transition hover:opacity-90"
+          style={{ backgroundColor: C.forest, color: "white" }}
+        >
+          Request a confirmed quote →
+        </button>
+        <div className="text-center mt-2">
+          <button
+            onClick={onBack}
+            className="text-xs transition hover:opacity-70"
+            style={{ color: C.mutedText }}
+          >
+            ← Back to proposal
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SnapshotHeroItem({ label, value, primary }) {
+  return (
+    <div
+      className="rounded-lg px-3 py-2.5"
+      style={{
+        backgroundColor: primary ? C.forestDark : C.lightBg,
+        color: primary ? "white" : C.forestDark,
+      }}
+    >
+      <div
+        className="text-[10px] uppercase tracking-wider mb-0.5"
+        style={{ color: primary ? C.mint : C.mutedText }}
+      >
+        {label}
+      </div>
+      <div
+        className="tabular-nums"
+        style={{
+          fontFamily: "'Playfair Display', Georgia, serif",
+          fontSize: "20px",
+          fontWeight: 400,
+          lineHeight: 1.1,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SnapshotMiniRow({ label, value, last }) {
+  return (
+    <div
+      className="flex justify-between py-1"
+      style={{ borderBottom: last ? "none" : `1px dashed ${C.cardBorder}80` }}
+    >
+      <span style={{ color: C.mutedText }}>{label}</span>
+      <span className="tabular-nums font-medium" style={{ color: C.forestDark }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// =========================================================
+// STEP 5: NEXT STEPS (with WhatsApp share)
+// =========================================================
+function NextStepsStep({
+  phone,
+  selectedStructure,
+  applicableLoanIOnly,
+  applicableLoanBalloon,
+  cashoutIOnly,
+  cashoutBalloon,
+  iOnlyMonthly,
+  balloonMonthly,
+  fmt,
+  onBack,
+}) {
+  // Build the WhatsApp message based on role + selected structure.
+  // Phone number is never displayed in UI; only used in the wa.me URL on click.
+  const buildWhatsappMessage = (role) => {
+    const isBalloon = selectedStructure === "balloon";
+    const aLoan = isBalloon ? applicableLoanBalloon : applicableLoanIOnly;
+    const cashout = isBalloon ? cashoutBalloon : cashoutIOnly;
+    const monthly = isBalloon ? balloonMonthly : iOnlyMonthly;
+    const structLabel = isBalloon ? "P+I Balloon, Year 5" : "Interest-Only, 1-year";
+
+    if (role === "broker") {
+      return [
+        "Hi Vu, requesting a quotation for a client.",
+        "",
+        "ABOUT THE PROPERTY",
+        "- Address: [please fill]",
+        "- Type: [Condo / Landed / Commercial / Industrial B1]",
+        "- Size: [sqft]",
+        "- Tenure: [Freehold / 99-year / 999-year]",
+        "- Indicative valuation: $[amount]",
+        "",
+        "ABOUT THE BORROWER",
+        "- Borrower: [Pte Ltd / individual]",
+        "- Existing loan: $[amount] with [bank]",
+        "- CPF used: $[amount, or 'none']",
+        "",
+        "INDICATIVE FROM VUCALC+",
+        `- Estimated loan: ${fmt(aLoan)}`,
+        `- Cashout: ${fmt(cashout)}`,
+        `- Monthly: ${fmt(monthly)} (${structLabel})`,
+        "",
+        "Could you share a confirmed quote? Thanks.",
+      ].join("\n");
+    }
+    if (role === "client") {
+      return [
+        "Hi Vu, I'd like to explore a property loan and got these indicative numbers from VuCalc+.",
+        "",
+        "ABOUT THE PROPERTY",
+        "- Address: [please fill]",
+        "- Type: [Condo / Landed / Commercial / Industrial B1]",
+        "- Size: [sqft]",
+        "- Tenure: [Freehold / 99-year / 999-year]",
+        "- Estimated value: $[amount]",
+        "",
+        "ABOUT MY SITUATION",
+        "- Borrower: [my company / personal]",
+        "- Existing loan: $[amount] with [bank]",
+        "- CPF used: $[amount, or 'none']",
+        "",
+        "INDICATIVE FROM VUCALC+",
+        `- Estimated loan: ${fmt(aLoan)}`,
+        `- Cashout: ${fmt(cashout)}`,
+        `- Monthly: ${fmt(monthly)} (${structLabel})`,
+        "",
+        "Could you walk me through next steps?",
+      ].join("\n");
+    }
+    return "Hi Vu, I'd like to chat about a property loan.";
+  };
+
+  const openWhatsapp = (role) => {
+    const msg = encodeURIComponent(buildWhatsappMessage(role));
+    const url = `https://wa.me/${phone}?text=${msg}`;
+    window.open(url, "_blank");
+  };
+
   const docs = [
     "Details of the property, including address, size, and tenure",
     "Names of the borrower and personal guarantor(s), so we can run ACRA and EIS searches",
@@ -1250,7 +1941,7 @@ function NextStepsStep({ onBack }) {
 
   return (
     <div className="space-y-6">
-      <div className="mb-6 flex items-start justify-between flex-wrap gap-3">
+      <div className="mb-2 flex items-start justify-between flex-wrap gap-3">
         <div className="flex-1">
           <h2
             className="text-2xl sm:text-3xl md:text-4xl font-light tracking-tight mb-2"
@@ -1258,85 +1949,55 @@ function NextStepsStep({ onBack }) {
           >
             A few things to <em style={{ color: C.sage }}>prepare</em>
           </h2>
-          <p className="text-sm" style={{ color: C.mutedText }}>
-            Here's the paperwork we'll need to get your application moving. Send everything over, and we'll take it from there.
-          </p>
         </div>
         <button
           onClick={onBack}
           className="text-xs transition hover:opacity-70"
           style={{ color: C.mutedText }}
         >
-          ← Back to proposal
+          ← Back to snapshot
         </button>
       </div>
 
-      {/* Contact block */}
+      {/* Simple contact line — phone number kept hidden */}
       <div
-        className="rounded-xl p-5 sm:p-6 relative overflow-hidden"
+        className="rounded-lg px-4 py-3 text-sm flex flex-wrap items-center gap-2"
         style={{
-          background: `linear-gradient(135deg, ${C.mint} 0%, ${C.sage}40 100%)`,
-          border: `1px solid ${C.sage}80`,
+          backgroundColor: C.mint + "60",
+          border: `1px solid ${C.sage}66`,
+          color: C.forestDark,
         }}
       >
-        <div className="absolute -top-8 -right-8 opacity-20">
-          <LeafIcon color={C.forest} size={80} />
-        </div>
-        <div className="relative">
-          <h3
-            className="text-xs uppercase tracking-widest mb-4 font-medium"
-            style={{ color: C.forestDark }}
-          >
-            Send documents to Vu
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-sm">
-            <div className="flex items-start gap-3">
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                style={{ backgroundColor: "white" }}
-              >
-                <MailIcon color={C.forest} size={20} />
-              </div>
-              <div>
-                <div
-                  className="text-xs uppercase tracking-wider mb-0.5"
-                  style={{ color: C.forest }}
-                >
-                  Email
-                </div>
-                <a
-                  href="mailto:thienvu_le@ols.com.sg"
-                  className="font-medium hover:underline break-all"
-                  style={{ color: C.forestDark }}
-                >
-                  thienvu_le@ols.com.sg
-                </a>
-              </div>
-            </div>
-            <div className="flex items-start gap-3">
-              <div
-                className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-                style={{ backgroundColor: "white" }}
-              >
-                <WhatsappIcon color={C.forest} size={20} />
-              </div>
-              <div>
-                <div
-                  className="text-xs uppercase tracking-wider mb-0.5"
-                  style={{ color: C.forest }}
-                >
-                  WhatsApp
-                </div>
-                <span className="font-medium" style={{ color: C.forestDark }}>
-                  Feel free to send documents directly
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <span className="font-medium">Speak to Vu directly</span>
+        <span style={{ color: C.mutedText }}>·</span>
+        <a
+          href="mailto:thienvu_le@ols.com.sg"
+          className="font-medium hover:underline"
+          style={{ color: C.forestDark }}
+        >
+          thienvu_le@ols.com.sg
+        </a>
+        <span style={{ color: C.mutedText }}>·</span>
+        <button
+          onClick={() => openWhatsapp("plain")}
+          className="font-medium hover:underline"
+          style={{ color: C.forestDark, background: "none", border: "none", padding: 0, cursor: "pointer" }}
+        >
+          WhatsApp
+        </button>
       </div>
 
-      {/* Checklist */}
+      {/* TOP WhatsApp share panel */}
+      <WhatsappPanel
+        eyebrow="Send via WhatsApp"
+        title="Pick the message that fits you"
+        subtitle="We'll pre-fill your snapshot. You add the property details, then send."
+        topSubBroker="Requesting a quotation on behalf of a client."
+        topSubClient="Exploring a loan for my own property."
+        onWhatsapp={openWhatsapp}
+      />
+
+      {/* Document checklist */}
       <div
         className="rounded-xl overflow-hidden bg-white"
         style={{ border: `1px solid ${C.cardBorder}` }}
@@ -1349,10 +2010,7 @@ function NextStepsStep({ onBack }) {
           }}
         >
           <DocumentIcon color={C.forest} size={18} />
-          <h3
-            className="text-xs uppercase tracking-widest font-medium"
-            style={{ color: C.forest }}
-          >
+          <h3 className="text-xs uppercase tracking-widest font-medium" style={{ color: C.forest }}>
             Document checklist
           </h3>
         </div>
@@ -1402,6 +2060,16 @@ function NextStepsStep({ onBack }) {
         </div>
       </div>
 
+      {/* BOTTOM WhatsApp share panel — for users who scrolled past the top */}
+      <WhatsappPanel
+        eyebrow="Ready to send?"
+        title="One tap to message Vu"
+        subtitle="Same templates, in case you scrolled past the top."
+        topSubBroker="Send broker template via WhatsApp."
+        topSubClient="Send client template via WhatsApp."
+        onWhatsapp={openWhatsapp}
+      />
+
       {/* Closing reminder */}
       <div
         className="rounded-lg p-4 text-sm leading-relaxed"
@@ -1415,6 +2083,73 @@ function NextStepsStep({ onBack }) {
         documentation. If anything here needs clarifying, just reach out.
       </div>
     </div>
+  );
+}
+
+// =========================================================
+// WhatsApp share panel (used twice on Step 5)
+// =========================================================
+function WhatsappPanel({ eyebrow, title, subtitle, topSubBroker, topSubClient, onWhatsapp }) {
+  return (
+    <div
+      className="rounded-xl p-4 sm:p-5"
+      style={{
+        background: `linear-gradient(135deg, ${C.mint}99 0%, ${C.sage}55 100%)`,
+        border: `1px solid ${C.sage}80`,
+      }}
+    >
+      <div className="text-xs uppercase tracking-widest font-semibold" style={{ color: C.forestDark }}>
+        {eyebrow}
+      </div>
+      <h3
+        className="text-base sm:text-lg font-normal mt-1 mb-1"
+        style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+      >
+        {title}
+      </h3>
+      <p className="text-xs mb-3" style={{ color: C.forestDark }}>
+        {subtitle}
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <WhatsappRoleButton
+          role="I'm a broker"
+          sub={topSubBroker}
+          onClick={() => onWhatsapp("broker")}
+        />
+        <WhatsappRoleButton
+          role="I'm a client"
+          sub={topSubClient}
+          onClick={() => onWhatsapp("client")}
+        />
+      </div>
+    </div>
+  );
+}
+
+function WhatsappRoleButton({ role, sub, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="text-left rounded-lg p-3 transition bg-white hover:shadow-md"
+      style={{ border: `1px solid ${C.sage}80` }}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <div
+          className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: "#25D366" }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+            <path d="M12 2 A10 10 0 0 0 4 17 L2 22 L7 20 A10 10 0 1 0 12 2 Z" />
+          </svg>
+        </div>
+        <span className="text-sm font-semibold" style={{ color: C.forestDark }}>
+          {role}
+        </span>
+      </div>
+      <div className="text-xs leading-snug" style={{ color: C.mutedText }}>
+        {sub}
+      </div>
+    </button>
   );
 }
 
