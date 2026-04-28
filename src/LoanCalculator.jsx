@@ -22,6 +22,25 @@ export default function LoanCalculator() {
   const [step, setStep] = useState("input");
   const [selectedStructure, setSelectedStructure] = useState(null);
 
+  // Track which steps the user has visited, so the StepIndicator can offer
+  // tappable backward navigation. The current step is always considered visited.
+  const [visitedSteps, setVisitedSteps] = useState(() => new Set(["input"]));
+
+  // Wrapper around setStep that records visited steps. Use this everywhere
+  // instead of setStep directly.
+  const goToStep = (s) => {
+    setStep(s);
+    setVisitedSteps((prev) => {
+      const next = new Set(prev);
+      next.add(s);
+      return next;
+    });
+    // Smooth scroll to top so the user starts at the top of the new step.
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   // Hidden constant: Vu's WhatsApp number, never displayed in the UI.
   // Used only when building wa.me deep links on user action.
   const VU_PHONE = "6591179540";
@@ -33,7 +52,6 @@ export default function LoanCalculator() {
   const [cpfPrincipal, setCpfPrincipal] = useState(null);
 
   const [proposedLoan, setProposedLoan] = useState(null);
-  const [userEditedLoan, setUserEditedLoan] = useState(false);
 
   const [interestRate, setInterestRate] = useState(0.0675);
   const [processingFeePct, setProcessingFeePct] = useState(0.02);
@@ -68,32 +86,24 @@ export default function LoanCalculator() {
       ? (n(outstanding) + n(cpfPrincipal)) / n(propertyValue)
       : 0;
 
-  // Tiered suggestion (Option B):
-  //   Current LTV 70% to 75%   -> suggest at 80% LTV
-  //   Otherwise                -> suggest at 75% LTV
-  // The suggested loan is now Property × tier directly (without CPF deduction)
-  // because CPF is now shown explicitly on the Proposal page. This way the
-  // Proposed LTV displayed on Step 1 lands cleanly on the tier value.
-  const suggestedLtvTier =
-    currentLtv >= 0.70 && currentLtv <= 0.75 ? 0.80 : 0.75;
+  // Hard cap: LTV cannot exceed 85%.
+  const LTV_CAP = 0.85;
 
-  const suggestedLoan = Math.max(0, n(propertyValue) * suggestedLtvTier);
+  // No auto-suggest. The user types either Amount to Structure or Proposed
+  // LTV directly; the other field auto-calculates from it. Both start empty.
+  // CPF is shown as an explicit deduction on Step 3 (Proposal page) — we
+  // don't pre-deduct it here.
+  const effectiveProposedLoan = n(proposedLoan);
 
-  const effectiveProposedLoan =
-    userEditedLoan && proposedLoan != null ? n(proposedLoan) : suggestedLoan;
-
-  // Proposed LTV on the input page is now clean: just Loan / Property.
-  // CPF impact is shown as an explicit deduction on Step 3 (Proposal).
+  // Proposed LTV: just Loan / Property. Clean.
   const proposedLtv =
     n(propertyValue) > 0 ? effectiveProposedLoan / n(propertyValue) : 0;
 
+  // True when the user has typed an LTV that exceeds the 85% cap.
+  const ltvExceeded = proposedLtv > LTV_CAP + 0.0001;
+
   const handleProposedLoanChange = (v) => {
     setProposedLoan(v);
-    setUserEditedLoan(true);
-  };
-  const resetProposedLoan = () => {
-    setUserEditedLoan(false);
-    setProposedLoan(null);
   };
 
   // The proposed loan as entered (before CPF deduction)
@@ -235,7 +245,7 @@ export default function LoanCalculator() {
               </p>
             </div>
           </div>
-          <StepIndicator step={step} />
+          <StepIndicator step={step} visitedSteps={visitedSteps} onGoToStep={goToStep} />
         </div>
       </header>
 
@@ -279,24 +289,22 @@ export default function LoanCalculator() {
             valuationFee={valuationFee}
             setValuationFee={setValuationFee}
             proposedLoan={effectiveProposedLoan}
-            suggestedLoan={suggestedLoan}
-            suggestedLtvTier={suggestedLtvTier}
-            userEditedLoan={userEditedLoan}
             onProposedLoanChange={handleProposedLoanChange}
-            onResetLoan={resetProposedLoan}
             proposedLtv={proposedLtv}
+            ltvExceeded={ltvExceeded}
+            ltvCap={LTV_CAP}
             fmt={fmt}
             fmtPct={fmtPct}
-            onNext={() => setStep("select")}
+            onNext={() => goToStep("select")}
           />
         )}
 
         {step === "select" && (
           <SelectStep
-            onBack={() => setStep("input")}
+            onBack={() => goToStep("input")}
             onSelect={(s) => {
               setSelectedStructure(s);
-              setStep("results");
+              goToStep("results");
             }}
           />
         )}
@@ -338,12 +346,12 @@ export default function LoanCalculator() {
             setCompareFeesOpen={setCompareFeesOpen}
             fmt={fmt}
             fmtPct={fmtPct}
-            onBack={() => setStep("select")}
+            onBack={() => goToStep("select")}
             onRestart={() => {
-              setStep("input");
+              goToStep("input");
               setShowSchedule(null);
             }}
-            onProceed={() => setStep("snapshot")}
+            onProceed={() => goToStep("snapshot")}
           />
         )}
 
@@ -363,8 +371,8 @@ export default function LoanCalculator() {
             valuationFee={n(valuationFee)}
             interestRate={n(interestRate)}
             fmt={fmt}
-            onBack={() => setStep("results")}
-            onProceed={() => setStep("next-steps")}
+            onBack={() => goToStep("results")}
+            onProceed={() => goToStep("next-steps")}
           />
         )}
 
@@ -379,7 +387,7 @@ export default function LoanCalculator() {
             iOnlyMonthly={iOnlyMonthly}
             balloonMonthly={balloonMonthly}
             fmt={fmt}
-            onBack={() => setStep("snapshot")}
+            onBack={() => goToStep("snapshot")}
           />
         )}
       </main>
@@ -595,7 +603,7 @@ function CheckCircleIcon({ color = C.forest, size = 16 }) {
 // =========================================================
 // STEP INDICATOR
 // =========================================================
-function StepIndicator({ step }) {
+function StepIndicator({ step, visitedSteps, onGoToStep }) {
   const steps = [
     { id: "input", label: "Your details" },
     { id: "select", label: "Structure" },
@@ -605,52 +613,120 @@ function StepIndicator({ step }) {
   ];
   const currentIdx = steps.findIndex((s) => s.id === step);
 
+  // Default to a Set if not passed (defensive)
+  const visited = visitedSteps || new Set([step]);
+  const isVisited = (id) => visited.has(id);
+
+  const handleTap = (s) => {
+    if (s.id === step) return;
+    if (isVisited(s.id) && onGoToStep) onGoToStep(s.id);
+  };
+
   return (
     <>
-      {/* Mobile: just numbered dots and the current label */}
+      {/* Mobile: tappable dots + current step label */}
       <div className="flex sm:hidden items-center gap-2 text-xs">
-        <div className="flex items-center gap-1">
-          {steps.map((s, i) => (
-            <div
-              key={s.id}
-              className="w-2 h-2 rounded-full transition"
-              style={{
-                backgroundColor: i <= currentIdx ? C.forest : C.bone,
-              }}
-            />
-          ))}
+        <div className="flex items-center gap-1.5">
+          {steps.map((s) => {
+            const isActive = s.id === step;
+            const tappable = isVisited(s.id) && !isActive;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => handleTap(s)}
+                disabled={!tappable}
+                aria-label={`Go to ${s.label}`}
+                className="rounded-full transition"
+                style={{
+                  width: 8,
+                  height: 8,
+                  padding: 0,
+                  border: "none",
+                  cursor: tappable ? "pointer" : "default",
+                  backgroundColor: isActive
+                    ? C.forestDark
+                    : isVisited(s.id)
+                    ? C.forest
+                    : C.bone,
+                  transform: isActive ? "scale(1.4)" : "scale(1)",
+                }}
+              />
+            );
+          })}
         </div>
         <span style={{ color: C.forestDark, fontWeight: 500 }}>
           Step {currentIdx + 1} of {steps.length}
         </span>
       </div>
 
-      {/* Desktop: full breadcrumb with labels */}
-      <div className="hidden sm:flex items-center gap-1.5 text-xs flex-wrap">
-        {steps.map((s, i) => (
-          <div key={s.id} className="flex items-center gap-1.5">
-            <div
-              className="w-6 h-6 rounded-full flex items-center justify-center font-medium text-[11px] transition"
-              style={{
-                backgroundColor: i <= currentIdx ? C.forest : C.bone,
-                color: i <= currentIdx ? "white" : C.mutedText,
-              }}
-            >
-              {i + 1}
+      {/* Desktop: tappable pills with labels */}
+      <div className="hidden sm:flex items-center gap-1 text-xs flex-wrap">
+        {steps.map((s, i) => {
+          const isActive = s.id === step;
+          const tappable = isVisited(s.id) && !isActive;
+          const pillStyle = {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            padding: "4px 8px",
+            borderRadius: 999,
+            border: "1px solid transparent",
+            background: isActive ? C.forestDark : "transparent",
+            color: isActive ? "white" : isVisited(s.id) ? C.forestDark : "#B5B2AC",
+            cursor: tappable ? "pointer" : "default",
+            transition: "all 0.18s",
+            fontFamily: "inherit",
+            fontSize: 11,
+          };
+          return (
+            <div key={s.id} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => handleTap(s)}
+                disabled={!tappable}
+                onMouseEnter={(e) => {
+                  if (tappable) {
+                    e.currentTarget.style.background = "rgba(139,164,154,0.18)";
+                    e.currentTarget.style.borderColor = "rgba(139,164,154,0.4)";
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (tappable) {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.borderColor = "transparent";
+                  }
+                }}
+                style={pillStyle}
+              >
+                <span
+                  className="rounded-full flex items-center justify-center font-medium"
+                  style={{
+                    width: 18,
+                    height: 18,
+                    fontSize: 10,
+                    backgroundColor: isActive
+                      ? "white"
+                      : isVisited(s.id)
+                      ? C.forest
+                      : C.bone,
+                    color: isActive
+                      ? C.forestDark
+                      : isVisited(s.id)
+                      ? "white"
+                      : C.mutedText,
+                  }}
+                >
+                  {i + 1}
+                </span>
+                <span style={{ fontWeight: isActive ? 500 : 400 }}>{s.label}</span>
+              </button>
+              {i < steps.length - 1 && (
+                <span style={{ color: "#C5C0B5", padding: "0 1px" }}>·</span>
+              )}
             </div>
-            <span
-              style={{
-                color: i === currentIdx ? C.forestDark : C.mutedText,
-                fontWeight: i === currentIdx ? 500 : 400,
-              }}
-            >
-              {s.label}
-            </span>
-            {i < steps.length - 1 && (
-              <span style={{ color: C.sage, margin: "0 2px" }}>·</span>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </>
   );
@@ -671,9 +747,11 @@ function InputStep({
   fireInsurance, setFireInsurance,
   legalFee, setLegalFee,
   valuationFee, setValuationFee,
-  proposedLoan, suggestedLoan, suggestedLtvTier, userEditedLoan,
-  onProposedLoanChange, onResetLoan,
+  proposedLoan,
+  onProposedLoanChange,
   proposedLtv,
+  ltvExceeded,
+  ltvCap,
   fmt, fmtPct, onNext,
 }) {
   const hasProperty = Number(propertyValue) > 0;
@@ -778,6 +856,7 @@ function InputStep({
               value={proposedLoan}
               onChange={onProposedLoanChange}
               emphasis
+              error={ltvExceeded}
             />
           </div>
           <div className="flex-1 min-w-[180px]">
@@ -785,46 +864,34 @@ function InputStep({
               label="Proposed LTV"
               value={hasProperty ? proposedLtv : 0}
               onChange={(v) => {
-                // Editing LTV recalculates loan, using the same 12-month
-                // projected CPF that drives the display:
-                //   (loan + cpfIOnly) / Property = LTV
-                //   loan = (LTV × Property) − cpfIOnly
+                // Editing LTV recalculates loan as a clean gross figure.
+                // CPF is deducted once on Step 3 as the Eligible Loan Amount;
+                // we don't pre-deduct it here.
                 if (!hasProperty) return;
-                const newLoan = Number(propertyValue) * v - Number(cpfIOnly ?? 0);
+                const newLoan = Number(propertyValue) * v;
                 onProposedLoanChange(
                   Math.max(0, Math.round(newLoan * 100) / 100)
                 );
               }}
-              max={0.85}
+              error={ltvExceeded}
             />
-            {proposedLtv > 0.85 && (
-              <p className="text-xs mt-1 italic" style={{ color: "#A0444C" }}>
-                Above the 85% cap. Please lower the loan amount.
+            {ltvExceeded && (
+              <p className="text-xs mt-1 italic" style={{ color: "#C44848" }}>
+                LTV cannot exceed {(ltvCap * 100).toFixed(0)}%. Please reduce the amount.
               </p>
             )}
           </div>
         </div>
-        <div className="mt-2 text-xs">
-          {!userEditedLoan ? (
-            <span className="font-medium" style={{ color: C.forest }}>
-              ✿ Auto-suggested at {(suggestedLtvTier * 100).toFixed(0)}% LTV
-            </span>
-          ) : (
-            <button
-              onClick={onResetLoan}
-              className="underline hover:opacity-80 transition"
-              style={{ color: C.forest }}
-            >
-              Reset to suggested ({fmt(suggestedLoan)})
-            </button>
-          )}
-        </div>
+        <p className="text-xs mt-3 italic" style={{ color: C.mutedText }}>
+          Type either field — the other will auto-calculate. Maximum LTV is{" "}
+          {(ltvCap * 100).toFixed(0)}%.
+        </p>
       </Card>
 
       <div className="flex justify-end pt-4">
         <button
           onClick={onNext}
-          disabled={!hasProperty || Number(proposedLoan) <= 0}
+          disabled={!hasProperty || Number(proposedLoan) <= 0 || ltvExceeded}
           className="w-full sm:w-auto px-8 py-3 rounded-md text-sm font-medium shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-md"
           style={{ backgroundColor: C.forest, color: "white" }}
         >
@@ -1019,8 +1086,8 @@ function ResultsStep({
   const title = isCompare
     ? "Compare both"
     : showIOnly
-    ? "Interest-Only · A year to breathe"
-    : "P+I Balloon · Steady progress";
+    ? "Interest-Only · Short-term cash flow flexibility"
+    : "P+I Balloon · Disciplined principal repayment";
 
   // CPF projection period label for the deduction block
   const cpfPeriodLabel = isCompare
@@ -1061,7 +1128,7 @@ function ResultsStep({
           <div className="flex items-center gap-2 mb-3">
             <Sprout color={C.sandDark} size={18} />
             <h3 className="text-xs uppercase tracking-widest font-medium" style={{ color: C.sandDark }}>
-              CPF projection · applicable loan calculation
+              CPF projection · eligible loan calculation
             </h3>
           </div>
           <div className="space-y-1.5 text-sm">
@@ -1084,12 +1151,12 @@ function ResultsStep({
               className="flex justify-between font-semibold pt-2 mt-1"
               style={{ borderTop: `1px solid ${C.sand}`, color: C.forestDark }}
             >
-              <span>Estimated Applicable Loan Amount</span>
+              <span>Eligible Loan Amount</span>
               <span className="tabular-nums">{fmt(applicableLoan)}</span>
             </div>
           </div>
           <p className="text-xs mt-3 italic leading-relaxed" style={{ color: C.sandDark }}>
-            CPF utilisation is projected over your repayment period and reduces the disbursable loan amount.
+            CPF utilisation is projected over your repayment period and reduces the amount available for drawdown.
           </p>
         </div>
       )}
@@ -1114,73 +1181,153 @@ function ResultsStep({
         />
       ) : (
         <>
-          {/* HERO CASH-OUT */}
+          {/* ELIGIBLE LOAN PANEL — three-tier hierarchy:
+              dark forest hero (Eligible Loan) → 2-col row (Cashout + Monthly)
+              → terse footer (Rate · Tenure) */}
           <div
-            className="relative rounded-2xl p-6 sm:p-8 overflow-hidden"
+            className="rounded-2xl overflow-hidden bg-white"
             style={{
-              background: `linear-gradient(135deg, ${C.forest} 0%, ${C.forestDark} 50%, ${C.forestDarker} 100%)`,
-              boxShadow: `0 20px 40px -20px ${C.forestDark}80`,
-              color: "white",
+              border: `1px solid ${C.cardBorder}`,
+              boxShadow: `0 8px 24px -12px ${C.forestDark}30`,
             }}
           >
+            {/* Hero: Eligible Loan Amount */}
             <div
-              className="absolute -top-20 -right-20 w-72 h-72 rounded-full blur-3xl opacity-30"
-              style={{ background: C.mint }}
-            />
-            <div
-              className="absolute -bottom-16 -left-16 w-56 h-56 rounded-full blur-3xl opacity-20"
-              style={{ background: C.sand }}
-            />
-            <svg
-              className="absolute top-4 right-4 opacity-20"
-              width="120"
-              height="120"
-              viewBox="0 0 120 120"
-              fill="none"
+              className="relative overflow-hidden p-5 sm:p-6"
+              style={{
+                background: `linear-gradient(135deg, ${C.forestDark} 0%, ${C.forestDarker} 100%)`,
+                color: "white",
+              }}
             >
-              <path
-                d="M100 20 C100 20 40 30 40 70 C40 85 55 95 70 95 C95 95 105 75 100 20 Z"
-                stroke={C.mint}
-                strokeWidth="1.5"
-                fill="none"
-              />
-              <path
-                d="M70 95 L50 65 M60 80 L75 70 M55 72 L68 62"
-                stroke={C.mint}
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-
-            <div className="relative">
-              <div className="flex items-baseline justify-between mb-3">
-                <span className="text-xs uppercase tracking-widest" style={{ color: C.mint }}>
-                  Your cash-out at disbursement
-                </span>
-                <span className="text-xs" style={{ color: C.mint + "CC" }}>
-                  indicative
-                </span>
-              </div>
-
               <div
-                className="text-4xl sm:text-5xl md:text-6xl font-light tracking-tight mb-6 tabular-nums leading-none"
-                style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-              >
-                {fmt(animCashout)}
+                className="absolute -top-12 -right-12 w-52 h-52 rounded-full blur-3xl"
+                style={{ background: C.mint, opacity: 0.15 }}
+              />
+              <div className="relative">
+                <div
+                  className="text-[10px] uppercase tracking-widest font-medium mb-1.5"
+                  style={{ color: C.mint }}
+                >
+                  Eligible Loan Amount
+                </div>
+                <div
+                  className="text-4xl sm:text-5xl md:text-6xl font-light tracking-tight tabular-nums leading-none"
+                  style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+                >
+                  {fmt(applicableLoan)}
+                </div>
+                <div
+                  className="text-[10px] italic mt-2"
+                  style={{ color: C.mint, opacity: 0.7 }}
+                >
+                  indicative · subject to credit approval
+                </div>
               </div>
+            </div>
 
+            {/* Pair: Cashout + Monthly */}
+            <div className="grid grid-cols-2">
               <div
-                className="grid grid-cols-[1fr_auto] gap-x-8 gap-y-2 text-sm pt-4"
-                style={{ borderTop: `1px solid ${C.mint}30` }}
+                className="p-4 sm:p-5"
+                style={{ borderRight: `1px solid ${C.cardBorder}` }}
               >
-                <div style={{ color: C.mint }}>Estimated Applicable Loan</div>
-                <div className="text-right tabular-nums">{fmt(applicableLoan)}</div>
-                <div style={{ color: C.mint }}>Less: current outstanding</div>
-                <div className="text-right tabular-nums">−{fmt(outstanding)}</div>
-                <div style={{ color: C.mint }}>Less: processing fee</div>
-                <div className="text-right tabular-nums">−{fmt(processingFee)}</div>
-                <div style={{ color: C.mint }}>Less: fire insurance</div>
-                <div className="text-right tabular-nums">−{fmt(fireInsurance)}</div>
+                <div
+                  className="text-[10px] uppercase tracking-wider font-medium mb-1"
+                  style={{ color: C.mutedText }}
+                >
+                  Cash-out at disbursement
+                </div>
+                <div
+                  className="tabular-nums leading-none"
+                  style={{
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "22px",
+                    color: C.forest,
+                    fontWeight: 500,
+                  }}
+                >
+                  {fmt(animCashout)}
+                </div>
+              </div>
+              <div className="p-4 sm:p-5">
+                <div
+                  className="text-[10px] uppercase tracking-wider font-medium mb-1"
+                  style={{ color: C.mutedText }}
+                >
+                  Monthly cash payment
+                </div>
+                <div
+                  className="tabular-nums leading-none"
+                  style={{
+                    fontFamily: "'Playfair Display', Georgia, serif",
+                    fontSize: "22px",
+                    color: C.forestDark,
+                    fontWeight: 400,
+                  }}
+                >
+                  {fmt(showIOnly ? iOnlyMonthly : balloonMonthly)}
+                </div>
+              </div>
+            </div>
+
+            {/* Footer: Rate + Tenure */}
+            <div
+              className="px-4 sm:px-5 py-2.5 text-xs flex items-center gap-2 flex-wrap"
+              style={{
+                backgroundColor: C.lightBg,
+                borderTop: `1px solid ${C.cardBorder}`,
+                color: C.mutedText,
+              }}
+            >
+              <span>
+                Rate{" "}
+                <strong style={{ color: C.forestDark, fontWeight: 500 }}>
+                  {fmtPct(interestRate)} p.a.
+                </strong>
+              </span>
+              <span style={{ color: C.cardBorder }}>·</span>
+              <span>
+                Tenure{" "}
+                <strong style={{ color: C.forestDark, fontWeight: 500 }}>
+                  {showIOnly ? "1 year (renewable)" : "5 years (balloon)"}
+                </strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Cashout breakdown — moved below the panel as supporting detail */}
+          <div
+            className="rounded-xl p-4 sm:p-5 bg-white"
+            style={{ border: `1px solid ${C.cardBorder}` }}
+          >
+            <div
+              className="text-xs uppercase tracking-widest font-medium mb-3"
+              style={{ color: C.forest }}
+            >
+              How we got to your cash-out
+            </div>
+            <div
+              className="grid grid-cols-[1fr_auto] gap-x-8 gap-y-2 text-sm"
+            >
+              <div style={{ color: C.bodyText }}>Eligible Loan Amount</div>
+              <div className="text-right tabular-nums">{fmt(applicableLoan)}</div>
+              <div style={{ color: C.bodyText }}>Less: current outstanding</div>
+              <div className="text-right tabular-nums">−{fmt(outstanding)}</div>
+              <div style={{ color: C.bodyText }}>Less: processing fee</div>
+              <div className="text-right tabular-nums">−{fmt(processingFee)}</div>
+              <div style={{ color: C.bodyText }}>Less: fire insurance</div>
+              <div className="text-right tabular-nums">−{fmt(fireInsurance)}</div>
+              <div
+                className="font-semibold pt-2"
+                style={{ color: C.forestDark, borderTop: `1px solid ${C.cardBorder}` }}
+              >
+                Cash-out at disbursement
+              </div>
+              <div
+                className="text-right tabular-nums font-semibold pt-2"
+                style={{ color: C.forest, borderTop: `1px solid ${C.cardBorder}` }}
+              >
+                {fmt(cashout)}
               </div>
             </div>
           </div>
@@ -1346,29 +1493,77 @@ function ResultsStep({
         </div>
       </div>
 
-      {/* CTA — view snapshot */}
+      {/* WHAT HAPPENS NEXT — preview card replaces the old single CTA */}
       <div
-        className="rounded-xl p-5 sm:p-6 flex items-center justify-between flex-wrap gap-4"
+        className="rounded-2xl p-5 sm:p-6"
         style={{
-          background: `linear-gradient(135deg, ${C.forestDark} 0%, ${C.forest} 100%)`,
-          color: "white",
+          background: `linear-gradient(180deg, white 0%, ${C.lightBg} 100%)`,
+          border: `1px solid ${C.cardBorder}`,
         }}
       >
-        <div className="flex items-center gap-4">
-          <CheckCircleIcon color={C.mint} size={28} />
-          <div>
-            <h3 className="text-lg font-medium mb-0.5">Ready for your snapshot?</h3>
-            <p className="text-sm" style={{ color: C.mint }}>
-              Review the one-screen summary you can share or screenshot.
-            </p>
+        <div
+          className="text-xs uppercase tracking-widest font-medium mb-1"
+          style={{ color: C.sage }}
+        >
+          What happens next
+        </div>
+        <h3
+          className="text-base sm:text-lg font-normal mb-1"
+          style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+        >
+          From here to a confirmed quote
+        </h3>
+        <p className="text-xs sm:text-sm leading-relaxed mb-4" style={{ color: C.mutedText }}>
+          To proceed with a confirmed quote, the next steps typically include a document review and a
+          property assessment.
+        </p>
+
+        <div className="space-y-1">
+          <div
+            className="flex gap-3 items-start py-2.5"
+            style={{ borderBottom: `1px dashed ${C.cardBorder}` }}
+          >
+            <div
+              className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold"
+              style={{ backgroundColor: C.mint, color: C.forestDark }}
+            >
+              1
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium mb-0.5" style={{ color: C.forestDark }}>
+                Document checklist
+              </div>
+              <div className="text-xs leading-relaxed" style={{ color: C.mutedText }}>
+                A standard set of documents — NRIC, NOA, CBS report, financials — that lets us assess
+                your application properly.
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-3 items-start py-2.5">
+            <div
+              className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold"
+              style={{ backgroundColor: C.mint, color: C.forestDark }}
+            >
+              2
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium mb-0.5" style={{ color: C.forestDark }}>
+                Property site visit
+              </div>
+              <div className="text-xs leading-relaxed" style={{ color: C.mutedText }}>
+                A short visit with Vu and our management to inspect the pledged property. A standard
+                part of the process.
+              </div>
+            </div>
           </div>
         </div>
+
         <button
           onClick={onProceed}
-          className="w-full sm:w-auto px-6 py-3 rounded-md text-sm font-medium transition hover:opacity-90"
-          style={{ backgroundColor: "white", color: C.forestDark }}
+          className="w-full mt-4 px-6 py-3 rounded-md text-sm font-medium transition hover:opacity-90"
+          style={{ backgroundColor: C.forest, color: "white" }}
         >
-          View Loan Snapshot →
+          Continue to your snapshot →
         </button>
       </div>
     </div>
@@ -1395,126 +1590,334 @@ function CompareView({
   setCompareFeesOpen,
 }) {
   return (
-    <div className="space-y-5">
-      {/* TWO-COLUMN METRICS TABLE */}
+    <div className="space-y-4">
+      {/* SHARED BASE — Eligible Loan Amount + Interest Rate */}
       <div
         className="rounded-2xl overflow-hidden bg-white"
-        style={{ border: `1px solid ${C.cardBorder}` }}
+        style={{
+          border: `1px solid ${C.cardBorder}`,
+          boxShadow: `0 8px 24px -12px ${C.forestDark}30`,
+        }}
       >
-        {/* Headers */}
-        <div className="grid grid-cols-2">
+        <div
+          className="relative overflow-hidden p-5 sm:p-6"
+          style={{
+            background: `linear-gradient(135deg, ${C.forestDark} 0%, ${C.forestDarker} 100%)`,
+            color: "white",
+          }}
+        >
           <div
-            className="p-4 sm:p-5 text-center"
+            className="absolute -top-12 -right-12 w-52 h-52 rounded-full blur-3xl"
+            style={{ background: C.mint, opacity: 0.15 }}
+          />
+          <div className="relative">
+            <div
+              className="text-[10px] uppercase tracking-widest font-medium mb-1.5"
+              style={{ color: C.mint }}
+            >
+              Shared base · same for both options
+            </div>
+            <div
+              className="text-3xl sm:text-4xl md:text-5xl font-light tracking-tight tabular-nums leading-none"
+              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+            >
+              {fmt(applicableLoanIOnly)}
+            </div>
+            <div
+              className="inline-block mt-3 px-3 py-1 rounded-full text-[11px]"
+              style={{
+                backgroundColor: "rgba(203,222,211,0.18)",
+                border: "1px solid rgba(203,222,211,0.3)",
+                color: C.mint,
+              }}
+            >
+              Interest rate{" "}
+              <strong style={{ color: "white", fontWeight: 500 }}>
+                {fmtPct(interestRate)} p.a.
+              </strong>
+            </div>
+            <div
+              className="text-[10px] italic mt-2"
+              style={{ color: C.mint, opacity: 0.7 }}
+            >
+              Eligible Loan Amount · indicative · subject to credit approval
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* TWO OPTION CARDS — side-by-side on desktop, stacked on mobile */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+        {/* Option A: Interest-Only */}
+        <div
+          className="rounded-2xl overflow-hidden bg-white flex flex-col"
+          style={{ border: `1px solid ${C.cardBorder}` }}
+        >
+          <div
+            className="p-4 sm:p-5"
             style={{
-              borderBottom: `2px solid ${C.sage}`,
-              borderRight: `1px solid ${C.cardBorder}99`,
+              borderTop: `3px solid ${C.sage}`,
+              borderBottom: `1px solid ${C.cardBorder}`,
               background: `linear-gradient(180deg, ${C.mint}40 0%, ${C.mint}10 100%)`,
             }}
           >
             <div
-              className="w-9 h-9 rounded-full mx-auto mb-2 flex items-center justify-center"
-              style={{ backgroundColor: "rgba(255,255,255,0.7)" }}
-            >
-              <ClockIcon color={C.sageDark} size={20} />
-            </div>
-            <div
-              className="text-xs uppercase tracking-wider font-medium mb-0.5"
+              className="text-[10px] uppercase tracking-wider font-medium mb-0.5"
               style={{ color: C.sageDark }}
             >
               Option A
             </div>
             <h3
-              className="text-lg sm:text-xl font-normal mb-0.5"
-              style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+              className="font-normal mb-0.5"
+              style={{
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "18px",
+                color: C.forestDark,
+              }}
             >
               Interest-Only
             </h3>
             <div className="text-xs" style={{ color: C.mutedText }}>
-              1-year tenure, with option to renew
+              Short-term cash flow flexibility
+            </div>
+          </div>
+
+          <div className="p-4 sm:p-5 flex-1 space-y-3">
+            <div className="pb-2" style={{ borderBottom: `1px dashed ${C.cardBorder}` }}>
+              <div
+                className="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style={{ color: C.mutedText }}
+              >
+                Cash-out at disbursement
+              </div>
+              <div
+                className="tabular-nums leading-none"
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "22px",
+                  color: C.forest,
+                  fontWeight: 500,
+                }}
+              >
+                {fmt(cashoutIOnly)}
+              </div>
+            </div>
+            <div className="pb-2" style={{ borderBottom: `1px dashed ${C.cardBorder}` }}>
+              <div
+                className="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style={{ color: C.mutedText }}
+              >
+                Monthly servicing
+              </div>
+              <div
+                className="tabular-nums leading-none"
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "22px",
+                  color: C.forestDark,
+                }}
+              >
+                {fmt(iOnlyMonthly)}
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
+                interest only
+              </div>
+            </div>
+            <div>
+              <div
+                className="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style={{ color: C.mutedText }}
+              >
+                Tenure
+              </div>
+              <div
+                className="tabular-nums leading-none"
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "18px",
+                  color: C.forestDark,
+                }}
+              >
+                1 year
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
+                renewable
+              </div>
             </div>
           </div>
 
           <div
-            className="p-4 sm:p-5 text-center"
+            className="px-4 sm:px-5 py-3"
             style={{
-              borderBottom: `2px solid ${C.forest}`,
+              backgroundColor: C.lightBg + "B3",
+              borderTop: `1px solid ${C.cardBorder}`,
+            }}
+          >
+            <div
+              className="text-[11px] font-medium mb-1"
+              style={{ color: C.forestDark }}
+            >
+              Why pick Interest-Only
+            </div>
+            <p className="text-xs leading-relaxed" style={{ color: C.bodyText }}>
+              Best if you expect a liquidity event within the next year, perhaps a contract, asset
+              sale, or refinancing window. Light monthly outgoings protect your working capital
+              while you wait.
+            </p>
+          </div>
+        </div>
+
+        {/* Option B: P+I Balloon */}
+        <div
+          className="rounded-2xl overflow-hidden bg-white flex flex-col"
+          style={{ border: `1px solid ${C.cardBorder}` }}
+        >
+          <div
+            className="p-4 sm:p-5"
+            style={{
+              borderTop: `3px solid ${C.forest}`,
+              borderBottom: `1px solid ${C.cardBorder}`,
               background: `linear-gradient(180deg, ${C.mint}40 0%, ${C.mint}10 100%)`,
             }}
           >
             <div
-              className="w-9 h-9 rounded-full mx-auto mb-2 flex items-center justify-center"
-              style={{ backgroundColor: "rgba(255,255,255,0.7)" }}
-            >
-              <TreeIcon color={C.forest} size={20} />
-            </div>
-            <div
-              className="text-xs uppercase tracking-wider font-medium mb-0.5"
+              className="text-[10px] uppercase tracking-wider font-medium mb-0.5"
               style={{ color: C.forest }}
             >
               Option B
             </div>
             <h3
-              className="text-lg sm:text-xl font-normal mb-0.5"
-              style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
+              className="font-normal mb-0.5"
+              style={{
+                fontFamily: "'Playfair Display', Georgia, serif",
+                fontSize: "18px",
+                color: C.forestDark,
+              }}
             >
               P+I Balloon
             </h3>
             <div className="text-xs" style={{ color: C.mutedText }}>
-              Balloon at year 5
+              Disciplined principal repayment
             </div>
           </div>
-        </div>
 
-        {/* Rows */}
-        <CompareRowLabel label="Cash-out at disbursement" />
-        <div className="grid grid-cols-2">
-          <CompareCell value={fmt(cashoutIOnly)} variant="cashout" leftBorder />
-          <CompareCell value={fmt(cashoutBalloon)} variant="cashout" />
-        </div>
+          <div className="p-4 sm:p-5 flex-1 space-y-3">
+            <div className="pb-2" style={{ borderBottom: `1px dashed ${C.cardBorder}` }}>
+              <div
+                className="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style={{ color: C.mutedText }}
+              >
+                Cash-out at disbursement
+              </div>
+              <div
+                className="tabular-nums leading-none"
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "22px",
+                  color: C.forest,
+                  fontWeight: 500,
+                }}
+              >
+                {fmt(cashoutBalloon)}
+              </div>
+            </div>
+            <div className="pb-2" style={{ borderBottom: `1px dashed ${C.cardBorder}` }}>
+              <div
+                className="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style={{ color: C.mutedText }}
+              >
+                Monthly servicing
+              </div>
+              <div
+                className="tabular-nums leading-none"
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "22px",
+                  color: C.forestDark,
+                }}
+              >
+                {fmt(balloonMonthly)}
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
+                P + I
+              </div>
+            </div>
+            <div>
+              <div
+                className="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style={{ color: C.mutedText }}
+              >
+                Tenure
+              </div>
+              <div
+                className="tabular-nums leading-none"
+                style={{
+                  fontFamily: "'Playfair Display', Georgia, serif",
+                  fontSize: "18px",
+                  color: C.forestDark,
+                }}
+              >
+                5 years
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
+                balloon
+              </div>
+            </div>
+          </div>
 
-        <CompareRowLabel label="Monthly servicing" />
-        <div className="grid grid-cols-2">
-          <CompareCell value={fmt(iOnlyMonthly)} sub="interest only" leftBorder />
-          <CompareCell value={fmt(balloonMonthly)} sub="P + I" />
+          <div
+            className="px-4 sm:px-5 py-3"
+            style={{
+              backgroundColor: C.lightBg + "B3",
+              borderTop: `1px solid ${C.cardBorder}`,
+            }}
+          >
+            <div
+              className="text-[11px] font-medium mb-1"
+              style={{ color: C.forestDark }}
+            >
+              Why pick P+I Balloon
+            </div>
+            <p className="text-xs leading-relaxed" style={{ color: C.bodyText }}>
+              Best if you'd rather chip away at the debt steadily. Each payment builds equity,
+              leaving a smaller balloon at year 5 and a stronger refinancing position.
+            </p>
+          </div>
         </div>
+      </div>
 
-        <CompareRowLabel label="Interest rate" />
-        <div className="grid grid-cols-2">
-          <CompareCell value={fmtPct(interestRate)} sub="p.a." small leftBorder />
-          <CompareCell value={fmtPct(interestRate)} sub="p.a." small />
-        </div>
-
-        <CompareRowLabel label="Tenure" />
-        <div className="grid grid-cols-2">
-          <CompareCell value="1 year" sub="renewable" small leftBorder noBottomBorder />
-          <CompareCell value="5 years" sub="balloon" small noBottomBorder />
-        </div>
-
-        {/* Fees toggle */}
+      {/* Fees collapsible — de-emphasised */}
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{
+          backgroundColor: C.lightBg + "B3",
+          border: `1px solid ${C.cardBorder}`,
+        }}
+      >
         <button
+          type="button"
           onClick={() => setCompareFeesOpen(!compareFeesOpen)}
-          className="w-full py-2.5 px-4 text-xs transition hover:bg-stone-50"
+          className="w-full px-4 py-2.5 text-xs transition hover:bg-stone-50"
           style={{
-            borderTop: `1px solid ${C.cardBorder}99`,
             color: C.mutedText,
-            backgroundColor: C.lightBg + "80",
+            border: "none",
+            background: "transparent",
+            fontFamily: "inherit",
           }}
         >
           {compareFeesOpen ? "Hide fees & charges ▴" : "Show fees & charges ▾"}
         </button>
-
-        {/* Fees detail */}
         {compareFeesOpen && (
           <div
             className="px-4 py-3"
             style={{
-              borderTop: `1px solid ${C.cardBorder}99`,
-              backgroundColor: C.lightBg + "60",
+              borderTop: `1px solid ${C.cardBorder}`,
+              backgroundColor: C.lightBg,
             }}
           >
             <div
               className="text-[10px] uppercase tracking-wider text-center mb-1"
-              style={{ color: C.mutedText }}
+              style={{ color: C.mutedText, fontWeight: 500 }}
             >
               Processing fee
             </div>
@@ -1525,13 +1928,16 @@ function CompareView({
               >
                 {fmt(processingFeeIOnly)}
               </div>
-              <div className="text-center text-xs tabular-nums font-medium" style={{ color: C.bodyText }}>
+              <div
+                className="text-center text-xs tabular-nums font-medium"
+                style={{ color: C.bodyText }}
+              >
                 {fmt(processingFeeBalloon)}
               </div>
             </div>
             <div
               className="text-[10px] uppercase tracking-wider text-center mb-1"
-              style={{ color: C.mutedText }}
+              style={{ color: C.mutedText, fontWeight: 500 }}
             >
               Fire insurance
             </div>
@@ -1542,102 +1948,16 @@ function CompareView({
               >
                 {fmt(fireInsurance)}
               </div>
-              <div className="text-center text-xs tabular-nums font-medium" style={{ color: C.bodyText }}>
+              <div
+                className="text-center text-xs tabular-nums font-medium"
+                style={{ color: C.bodyText }}
+              >
                 {fmt(fireInsurance)}
               </div>
             </div>
           </div>
         )}
       </div>
-
-      {/* RATIONALE CARDS — equal weight */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div
-          className="rounded-xl p-4 sm:p-5 bg-white"
-          style={{ border: `1px solid ${C.cardBorder}`, borderTop: `3px solid ${C.sage}` }}
-        >
-          <div
-            className="text-xs uppercase tracking-wider font-medium mb-1"
-            style={{ color: C.sageDark }}
-          >
-            Why pick Interest-Only
-          </div>
-          <h4
-            className="text-base font-normal mb-2"
-            style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
-          >
-            A year to breathe
-          </h4>
-          <p className="text-sm leading-relaxed" style={{ color: C.bodyText }}>
-            Best if you expect a liquidity event within the next year, perhaps a contract, asset sale,
-            or refinancing window. Light monthly outgoings protect your working capital while you wait.
-          </p>
-        </div>
-
-        <div
-          className="rounded-xl p-4 sm:p-5 bg-white"
-          style={{ border: `1px solid ${C.cardBorder}`, borderTop: `3px solid ${C.forest}` }}
-        >
-          <div
-            className="text-xs uppercase tracking-wider font-medium mb-1"
-            style={{ color: C.forest }}
-          >
-            Why pick P+I Balloon
-          </div>
-          <h4
-            className="text-base font-normal mb-2"
-            style={{ fontFamily: "'Playfair Display', Georgia, serif", color: C.forestDark }}
-          >
-            Steady progress
-          </h4>
-          <p className="text-sm leading-relaxed" style={{ color: C.bodyText }}>
-            Best if you'd rather chip away at the debt steadily. Each payment builds equity, leaving a
-            smaller balloon at year 5 and a stronger refinancing position.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CompareRowLabel({ label }) {
-  return (
-    <div
-      className="px-4 pt-2.5 pb-1 text-center text-[10px] uppercase tracking-wider"
-      style={{
-        color: C.mutedText,
-        backgroundColor: C.lightBg + "80",
-      }}
-    >
-      {label}
-    </div>
-  );
-}
-
-function CompareCell({ value, sub, variant, small, leftBorder, noBottomBorder }) {
-  const numStyle = {
-    fontFamily: "'Playfair Display', Georgia, serif",
-    fontSize: small ? "16px" : "22px",
-    color: variant === "cashout" ? C.forest : C.forestDark,
-    fontWeight: variant === "cashout" ? 500 : 400,
-    lineHeight: 1.1,
-  };
-  return (
-    <div
-      className="px-3 sm:px-4 pt-1.5 pb-3 text-center"
-      style={{
-        borderRight: leftBorder ? `1px solid ${C.cardBorder}80` : "none",
-        borderBottom: noBottomBorder ? "none" : `1px solid ${C.cardBorder}80`,
-      }}
-    >
-      <div className="tabular-nums" style={numStyle}>
-        {value}
-      </div>
-      {sub && (
-        <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
-          {sub}
-        </div>
-      )}
     </div>
   );
 }
@@ -1720,7 +2040,7 @@ function SnapshotStep({
         {/* Hero numbers */}
         <div className="space-y-2.5 mb-4">
           <SnapshotHeroItem
-            label="Estimated Applicable Loan"
+            label="Eligible Loan Amount"
             value={fmt(aLoan)}
             primary
           />
@@ -2407,7 +2727,7 @@ function parseNumberInput(str) {
   return isNaN(parsed) ? "" : cleaned;
 }
 
-function MoneyInput({ label, value, onChange, emphasis, optional }) {
+function MoneyInput({ label, value, onChange, emphasis, optional, error }) {
   const [rawInput, setRawInput] = useState(
     value == null || value === "" ? "" : String(value)
   );
@@ -2425,6 +2745,12 @@ function MoneyInput({ label, value, onChange, emphasis, optional }) {
     ? ""
     : formatWithCommas(rawInput);
 
+  // Border + ring style varies by state (error trumps emphasis)
+  const borderColor = error ? "#C44848" : emphasis ? C.forest : C.cardBorder;
+  const borderWidth = error || emphasis ? 2 : 1;
+  const ringColor = error ? "rgba(196,72,72,0.18)" : emphasis ? `${C.forest}20` : "transparent";
+  const showRing = error || emphasis;
+
   return (
     <label className="block">
       <div className="text-xs mb-1" style={{ color: C.mutedText }}>
@@ -2436,8 +2762,8 @@ function MoneyInput({ label, value, onChange, emphasis, optional }) {
       <div
         className="flex items-center rounded-md transition bg-white"
         style={{
-          border: emphasis ? `2px solid ${C.forest}` : `1px solid ${C.cardBorder}`,
-          boxShadow: emphasis ? `0 0 0 3px ${C.forest}20` : "none",
+          border: `${borderWidth}px solid ${borderColor}`,
+          boxShadow: showRing ? `0 0 0 3px ${ringColor}` : "none",
         }}
       >
         <span className="px-2.5 text-sm" style={{ color: C.mutedText }}>
@@ -2482,7 +2808,7 @@ function MoneyInput({ label, value, onChange, emphasis, optional }) {
   );
 }
 
-function PercentInput({ label, value, onChange, min, max }) {
+function PercentInput({ label, value, onChange, min, max, error }) {
   // Hold a raw string buffer while focused so users can type freely
   // (intermediate values like "6.", "6.7" without forcing .toFixed on every keystroke).
   const pctFromValue =
@@ -2511,7 +2837,9 @@ function PercentInput({ label, value, onChange, min, max }) {
       return;
     }
     if (min != null && parsed < min) parsed = min;
-    if (max != null && parsed > max) parsed = max;
+    // Skip max-clamping when error prop is set — caller is using the raw value
+    // to show a "value exceeded" error message.
+    if (!error && max != null && parsed > max) parsed = max;
     onChange(parsed);
   };
 
@@ -2522,7 +2850,10 @@ function PercentInput({ label, value, onChange, min, max }) {
       </div>
       <div
         className="flex items-center rounded-md bg-white"
-        style={{ border: `1px solid ${C.cardBorder}` }}
+        style={{
+          border: error ? `2px solid #C44848` : `1px solid ${C.cardBorder}`,
+          boxShadow: error ? `0 0 0 3px rgba(196,72,72,0.18)` : "none",
+        }}
       >
         <input
           type="text"
@@ -2547,12 +2878,14 @@ function PercentInput({ label, value, onChange, min, max }) {
 
             // Live-update the underlying value only if it's a valid parseable number
             // (so the linked field — e.g. loan amount ↔ LTV — stays in sync while typing).
+            // For fields with `error` prop (e.g. LTV with hard cap), let the value
+            // exceed the max so the parent can show an error state. For other fields
+            // (e.g. Processing Fee with a 3% cap), clamp silently as before.
             if (v !== "" && v !== ".") {
               const parsed = parseFloat(v) / 100;
               if (!isNaN(parsed)) {
-                // Apply max cap live, but not min (so a user typing "6" toward "6.75" isn't blocked)
                 let finalVal = parsed;
-                if (max != null && finalVal > max) finalVal = max;
+                if (!error && max != null && finalVal > max) finalVal = max;
                 onChange(finalVal);
               }
             }
