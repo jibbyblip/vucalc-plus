@@ -91,7 +91,7 @@ export default function LoanCalculator() {
 
   // No auto-suggest. The user types either Amount to Structure or Proposed
   // LTV directly; the other field auto-calculates from it. Both start empty.
-  // CPF is shown as an explicit deduction on Step 3 (Proposal page) — we
+  // CPF is shown as an explicit deduction on Step 3 (Proposal page); we
   // don't pre-deduct it here.
   const effectiveProposedLoan = n(proposedLoan);
 
@@ -865,7 +865,7 @@ function InputStep({
               value={hasProperty ? proposedLtv : 0}
               onChange={(v) => {
                 // Editing LTV recalculates loan as a clean gross figure.
-                // CPF is deducted once on Step 3 as the Eligible Loan Amount;
+                // CPF is deducted once on Step 3 as the Total Loan Amount;
                 // we don't pre-deduct it here.
                 if (!hasProperty) return;
                 const newLoan = Number(propertyValue) * v;
@@ -883,7 +883,7 @@ function InputStep({
           </div>
         </div>
         <p className="text-xs mt-3 italic" style={{ color: C.mutedText }}>
-          Type either field — the other will auto-calculate. Maximum LTV is{" "}
+          Type either field, the other will auto-calculate. Maximum LTV is{" "}
           {(ltvCap * 100).toFixed(0)}%.
         </p>
       </Card>
@@ -1116,8 +1116,8 @@ function ResultsStep({
         </div>
       </div>
 
-      {/* CPF DEDUCTION BLOCK — only shows when CPF > 0 */}
-      {hasCpf && (
+      {/* CPF DEDUCTION BLOCK, single-structure only (hidden on Compare both) */}
+      {hasCpf && !isCompare && (
         <div
           className="rounded-xl p-4 sm:p-5"
           style={{
@@ -1128,7 +1128,7 @@ function ResultsStep({
           <div className="flex items-center gap-2 mb-3">
             <Sprout color={C.sandDark} size={18} />
             <h3 className="text-xs uppercase tracking-widest font-medium" style={{ color: C.sandDark }}>
-              CPF projection · eligible loan calculation
+              CPF projection, total loan calculation
             </h3>
           </div>
           <div className="space-y-1.5 text-sm">
@@ -1151,7 +1151,7 @@ function ResultsStep({
               className="flex justify-between font-semibold pt-2 mt-1"
               style={{ borderTop: `1px solid ${C.sand}`, color: C.forestDark }}
             >
-              <span>Eligible Loan Amount</span>
+              <span>Total Loan Amount</span>
               <span className="tabular-nums">{fmt(applicableLoan)}</span>
             </div>
           </div>
@@ -1181,9 +1181,9 @@ function ResultsStep({
         />
       ) : (
         <>
-          {/* ELIGIBLE LOAN PANEL — three-tier hierarchy:
-              dark forest hero (Eligible Loan) → 2-col row (Cashout + Monthly)
-              → terse footer (Rate · Tenure) */}
+          {/* TOTAL LOAN PANEL, three-tier hierarchy:
+              dark forest hero (Total Loan Amount), 2-col row (Cash Released + Monthly Payment),
+              terse footer (Interest Rate, Tenure) */}
           <div
             className="rounded-2xl overflow-hidden bg-white"
             style={{
@@ -1191,7 +1191,7 @@ function ResultsStep({
               boxShadow: `0 8px 24px -12px ${C.forestDark}30`,
             }}
           >
-            {/* Hero: Eligible Loan Amount */}
+            {/* Hero: Total Loan Amount */}
             <div
               className="relative overflow-hidden p-5 sm:p-6"
               style={{
@@ -1208,7 +1208,7 @@ function ResultsStep({
                   className="text-[10px] uppercase tracking-widest font-medium mb-1.5"
                   style={{ color: C.mint }}
                 >
-                  Eligible Loan Amount
+                  Total Loan Amount
                 </div>
                 <div
                   className="text-4xl sm:text-5xl md:text-6xl font-light tracking-tight tabular-nums leading-none"
@@ -1225,7 +1225,7 @@ function ResultsStep({
               </div>
             </div>
 
-            {/* Pair: Cashout + Monthly */}
+            {/* Pair: Cash Released + Monthly Payment */}
             <div className="grid grid-cols-2">
               <div
                 className="p-4 sm:p-5"
@@ -1235,7 +1235,7 @@ function ResultsStep({
                   className="text-[10px] uppercase tracking-wider font-medium mb-1"
                   style={{ color: C.mutedText }}
                 >
-                  Cash-out at disbursement
+                  Cash Released at disbursement
                 </div>
                 <div
                   className="tabular-nums leading-none"
@@ -1254,7 +1254,7 @@ function ResultsStep({
                   className="text-[10px] uppercase tracking-wider font-medium mb-1"
                   style={{ color: C.mutedText }}
                 >
-                  Monthly cash payment
+                  Monthly Payment
                 </div>
                 <div
                   className="tabular-nums leading-none"
@@ -1267,10 +1267,13 @@ function ResultsStep({
                 >
                   {fmt(showIOnly ? iOnlyMonthly : balloonMonthly)}
                 </div>
+                <div className="text-[10px] mt-1" style={{ color: C.mutedText }}>
+                  {showIOnly ? "Interest-only" : "Principal & Interest"}
+                </div>
               </div>
             </div>
 
-            {/* Footer: Rate + Tenure */}
+            {/* Footer: Interest Rate + Tenure */}
             <div
               className="px-4 sm:px-5 py-2.5 text-xs flex items-center gap-2 flex-wrap"
               style={{
@@ -1280,7 +1283,7 @@ function ResultsStep({
               }}
             >
               <span>
-                Rate{" "}
+                Interest Rate{" "}
                 <strong style={{ color: C.forestDark, fontWeight: 500 }}>
                   {fmtPct(interestRate)} p.a.
                 </strong>
@@ -1295,7 +1298,7 @@ function ResultsStep({
             </div>
           </div>
 
-          {/* Cashout breakdown — moved below the panel as supporting detail */}
+          {/* Cash Released breakdown, moved below the panel as supporting detail */}
           <div
             className="rounded-xl p-4 sm:p-5 bg-white"
             style={{ border: `1px solid ${C.cardBorder}` }}
@@ -1304,12 +1307,12 @@ function ResultsStep({
               className="text-xs uppercase tracking-widest font-medium mb-3"
               style={{ color: C.forest }}
             >
-              How we got to your cash-out
+              How we got to your Cash Released
             </div>
             <div
               className="grid grid-cols-[1fr_auto] gap-x-8 gap-y-2 text-sm"
             >
-              <div style={{ color: C.bodyText }}>Eligible Loan Amount</div>
+              <div style={{ color: C.bodyText }}>Total Loan Amount</div>
               <div className="text-right tabular-nums">{fmt(applicableLoan)}</div>
               <div style={{ color: C.bodyText }}>Less: current outstanding</div>
               <div className="text-right tabular-nums">−{fmt(outstanding)}</div>
@@ -1321,7 +1324,7 @@ function ResultsStep({
                 className="font-semibold pt-2"
                 style={{ color: C.forestDark, borderTop: `1px solid ${C.cardBorder}` }}
               >
-                Cash-out at disbursement
+                Cash Released at disbursement
               </div>
               <div
                 className="text-right tabular-nums font-semibold pt-2"
@@ -1353,9 +1356,7 @@ function ResultsStep({
                       Why pick Interest-Only
                     </p>
                     <p style={{ color: C.bodyText }}>
-                      Best if you expect a liquidity event within the next year, perhaps a contract,
-                      asset sale, or refinancing window. Light monthly outgoings protect your working
-                      capital while you wait.
+                      Lower monthly payments, helping conserve cash flow in the near term.
                     </p>
                   </>
                 }
@@ -1404,8 +1405,7 @@ function ResultsStep({
                       Why pick P+I Balloon
                     </p>
                     <p style={{ color: C.bodyText }}>
-                      Best if you'd rather chip away at the debt steadily. Each payment builds equity,
-                      leaving a smaller balloon at year 5 and a stronger refinancing position.
+                      Gradual principal reduction with a stronger position for refinancing.
                     </p>
                   </>
                 }
@@ -1493,7 +1493,7 @@ function ResultsStep({
         </div>
       </div>
 
-      {/* WHAT HAPPENS NEXT — preview card replaces the old single CTA */}
+      {/* WHAT HAPPENS NEXT, preview card replaces the old single CTA */}
       <div
         className="rounded-2xl p-5 sm:p-6"
         style={{
@@ -1513,9 +1513,8 @@ function ResultsStep({
         >
           From here to a confirmed quote
         </h3>
-        <p className="text-xs sm:text-sm leading-relaxed mb-4" style={{ color: C.mutedText }}>
-          To proceed with a confirmed quote, the next steps typically include a document review and a
-          property assessment.
+        <p className="text-sm leading-relaxed mb-3" style={{ color: C.bodyText }}>
+          To proceed with a confirmed quote, the next steps typically include:
         </p>
 
         <div className="space-y-1">
@@ -1529,13 +1528,9 @@ function ResultsStep({
             >
               1
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium mb-0.5" style={{ color: C.forestDark }}>
-                Document checklist
-              </div>
-              <div className="text-xs leading-relaxed" style={{ color: C.mutedText }}>
-                A standard set of documents — NRIC, NOA, CBS report, financials — that lets us assess
-                your application properly.
+            <div className="flex-1 min-w-0 pt-0.5">
+              <div className="text-sm" style={{ color: C.forestDark }}>
+                Submission of loan application and supporting documents.
               </div>
             </div>
           </div>
@@ -1546,13 +1541,9 @@ function ResultsStep({
             >
               2
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-medium mb-0.5" style={{ color: C.forestDark }}>
-                Property site visit
-              </div>
-              <div className="text-xs leading-relaxed" style={{ color: C.mutedText }}>
-                A short visit with Vu and our management to inspect the pledged property. A standard
-                part of the process.
+            <div className="flex-1 min-w-0 pt-0.5">
+              <div className="text-sm" style={{ color: C.forestDark }}>
+                Arrangement of a property site visit.
               </div>
             </div>
           </div>
@@ -1571,7 +1562,7 @@ function ResultsStep({
 }
 
 // =========================================================
-// COMPARE VIEW — two-column metrics table with collapsible fees
+// COMPARE VIEW, two-column metrics table with collapsible fees
 // =========================================================
 function CompareView({
   applicableLoanIOnly,
@@ -1590,63 +1581,21 @@ function CompareView({
   setCompareFeesOpen,
 }) {
   return (
-    <div className="space-y-4">
-      {/* SHARED BASE — Eligible Loan Amount + Interest Rate */}
+    <div className="space-y-3 sm:space-y-4">
+      {/* FRAMING LINE */}
       <div
-        className="rounded-2xl overflow-hidden bg-white"
+        className="rounded-lg px-3 sm:px-4 py-2.5 text-xs sm:text-sm italic"
         style={{
-          border: `1px solid ${C.cardBorder}`,
-          boxShadow: `0 8px 24px -12px ${C.forestDark}30`,
+          background: "rgba(203,222,211,0.3)",
+          border: `1px solid ${C.sage}40`,
+          color: C.forestDark,
+          lineHeight: 1.5,
         }}
       >
-        <div
-          className="relative overflow-hidden p-5 sm:p-6"
-          style={{
-            background: `linear-gradient(135deg, ${C.forestDark} 0%, ${C.forestDarker} 100%)`,
-            color: "white",
-          }}
-        >
-          <div
-            className="absolute -top-12 -right-12 w-52 h-52 rounded-full blur-3xl"
-            style={{ background: C.mint, opacity: 0.15 }}
-          />
-          <div className="relative">
-            <div
-              className="text-[10px] uppercase tracking-widest font-medium mb-1.5"
-              style={{ color: C.mint }}
-            >
-              Shared base · same for both options
-            </div>
-            <div
-              className="text-3xl sm:text-4xl md:text-5xl font-light tracking-tight tabular-nums leading-none"
-              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
-            >
-              {fmt(applicableLoanIOnly)}
-            </div>
-            <div
-              className="inline-block mt-3 px-3 py-1 rounded-full text-[11px]"
-              style={{
-                backgroundColor: "rgba(203,222,211,0.18)",
-                border: "1px solid rgba(203,222,211,0.3)",
-                color: C.mint,
-              }}
-            >
-              Interest rate{" "}
-              <strong style={{ color: "white", fontWeight: 500 }}>
-                {fmtPct(interestRate)} p.a.
-              </strong>
-            </div>
-            <div
-              className="text-[10px] italic mt-2"
-              style={{ color: C.mint, opacity: 0.7 }}
-            >
-              Eligible Loan Amount · indicative · subject to credit approval
-            </div>
-          </div>
-        </div>
+        Compare repayment approaches based on your cash flow and refinancing goals.
       </div>
 
-      {/* TWO OPTION CARDS — side-by-side on desktop, stacked on mobile */}
+      {/* TWO OPTION CARDS, side-by-side on desktop, stacked on mobile */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
         {/* Option A: Interest-Only */}
         <div
@@ -1654,115 +1603,88 @@ function CompareView({
           style={{ border: `1px solid ${C.cardBorder}` }}
         >
           <div
-            className="p-4 sm:p-5"
+            className="px-4 py-3 flex items-start justify-between gap-2"
             style={{
               borderTop: `3px solid ${C.sage}`,
               borderBottom: `1px solid ${C.cardBorder}`,
               background: `linear-gradient(180deg, ${C.mint}40 0%, ${C.mint}10 100%)`,
             }}
           >
-            <div
-              className="text-[10px] uppercase tracking-wider font-medium mb-0.5"
-              style={{ color: C.sageDark }}
-            >
-              Option A
-            </div>
-            <h3
-              className="font-normal mb-0.5"
-              style={{
-                fontFamily: "'Playfair Display', Georgia, serif",
-                fontSize: "18px",
-                color: C.forestDark,
-              }}
-            >
-              Interest-Only
-            </h3>
-            <div className="text-xs" style={{ color: C.mutedText }}>
-              Short-term cash flow flexibility
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-5 flex-1 space-y-3">
-            <div className="pb-2" style={{ borderBottom: `1px dashed ${C.cardBorder}` }}>
-              <div
-                className="text-[10px] uppercase tracking-wider font-medium mb-1"
-                style={{ color: C.mutedText }}
-              >
-                Cash-out at disbursement
-              </div>
-              <div
-                className="tabular-nums leading-none"
-                style={{
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "22px",
-                  color: C.forest,
-                  fontWeight: 500,
-                }}
-              >
-                {fmt(cashoutIOnly)}
-              </div>
-            </div>
-            <div className="pb-2" style={{ borderBottom: `1px dashed ${C.cardBorder}` }}>
-              <div
-                className="text-[10px] uppercase tracking-wider font-medium mb-1"
-                style={{ color: C.mutedText }}
-              >
-                Monthly servicing
-              </div>
-              <div
-                className="tabular-nums leading-none"
-                style={{
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "22px",
-                  color: C.forestDark,
-                }}
-              >
-                {fmt(iOnlyMonthly)}
-              </div>
-              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
-                interest only
-              </div>
-            </div>
             <div>
-              <div
-                className="text-[10px] uppercase tracking-wider font-medium mb-1"
-                style={{ color: C.mutedText }}
-              >
-                Tenure
+              <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                <span
+                  className="text-[10px] uppercase tracking-wider font-semibold"
+                  style={{ color: C.sageDark }}
+                >
+                  Option A
+                </span>
+                <span
+                  className="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-semibold"
+                  style={{
+                    background: "rgba(139,164,154,0.2)",
+                    color: C.sageDark,
+                    border: `1px solid ${C.sage}59`,
+                  }}
+                >
+                  More flexible
+                </span>
               </div>
-              <div
-                className="tabular-nums leading-none"
+              <h3
+                className="font-normal"
                 style={{
                   fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "18px",
+                  fontSize: "16px",
                   color: C.forestDark,
+                  lineHeight: 1.1,
                 }}
               >
-                1 year
-              </div>
-              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
-                renewable
-              </div>
+                Interest-Only
+              </h3>
+            </div>
+            <div className="text-[10px] text-right" style={{ color: C.mutedText, lineHeight: 1.3 }}>
+              Short-term<br/>cash flow flexibility
             </div>
           </div>
 
-          <div
-            className="px-4 sm:px-5 py-3"
-            style={{
-              backgroundColor: C.lightBg + "B3",
-              borderTop: `1px solid ${C.cardBorder}`,
-            }}
-          >
-            <div
-              className="text-[11px] font-medium mb-1"
-              style={{ color: C.forestDark }}
-            >
-              Why pick Interest-Only
+          {/* 2x2 Metrics Grid */}
+          <div className="grid grid-cols-2">
+            <div className="px-3.5 py-2.5" style={{ borderRight: `1px solid ${C.cardBorder}`, borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Total Loan Amount</div>
+              <div className="tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "18px", color: C.forestDark }}>{fmt(applicableLoanIOnly)}</div>
             </div>
-            <p className="text-xs leading-relaxed" style={{ color: C.bodyText }}>
-              Best if you expect a liquidity event within the next year, perhaps a contract, asset
-              sale, or refinancing window. Light monthly outgoings protect your working capital
-              while you wait.
+            <div className="px-3.5 py-2.5" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Cash Released</div>
+              <div className="tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "18px", color: C.forest, fontWeight: 500 }}>{fmt(cashoutIOnly)}</div>
+            </div>
+            <div className="px-3.5 py-2.5" style={{ borderRight: `1px solid ${C.cardBorder}`, borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Monthly Payment</div>
+              <div className="tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "18px", color: C.forestDark }}>{fmt(iOnlyMonthly)}</div>
+              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>Interest-only</div>
+            </div>
+            <div className="px-3.5 py-2.5" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Tenure</div>
+              <div className="leading-tight mt-0.5" style={{ fontSize: "14px", color: C.forestDark, fontWeight: 500 }}>1 year</div>
+              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>renewable</div>
+            </div>
+          </div>
+
+          {/* Interest Rate row, prominent */}
+          <div className="grid grid-cols-2">
+            <div className="px-3.5 py-2.5" style={{ background: C.lightBg, borderRight: `1px solid ${C.cardBorder}`, borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Interest Rate</div>
+              <div className="tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "16px", color: C.forestDark, fontWeight: 500 }}>{fmtPct(interestRate)} p.a.</div>
+            </div>
+            <div className="px-3.5 py-2.5" style={{ background: C.lightBg, borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Structure</div>
+              <div className="leading-tight mt-0.5" style={{ fontSize: "13px", color: C.forestDark, fontWeight: 500 }}>No principal</div>
+            </div>
+          </div>
+
+          {/* Why pick */}
+          <div className="px-4 py-3 flex-1" style={{ background: C.lightBg + "B3" }}>
+            <div className="text-[10px] uppercase tracking-wider font-medium mb-1" style={{ color: C.mutedText }}>Why pick Interest-Only</div>
+            <p className="text-xs leading-relaxed" style={{ color: C.bodyText, margin: 0 }}>
+              Lower monthly payments, helping conserve cash flow in the near term.
             </p>
           </div>
         </div>
@@ -1773,120 +1695,94 @@ function CompareView({
           style={{ border: `1px solid ${C.cardBorder}` }}
         >
           <div
-            className="p-4 sm:p-5"
+            className="px-4 py-3 flex items-start justify-between gap-2"
             style={{
               borderTop: `3px solid ${C.forest}`,
               borderBottom: `1px solid ${C.cardBorder}`,
               background: `linear-gradient(180deg, ${C.mint}40 0%, ${C.mint}10 100%)`,
             }}
           >
-            <div
-              className="text-[10px] uppercase tracking-wider font-medium mb-0.5"
-              style={{ color: C.forest }}
-            >
-              Option B
-            </div>
-            <h3
-              className="font-normal mb-0.5"
-              style={{
-                fontFamily: "'Playfair Display', Georgia, serif",
-                fontSize: "18px",
-                color: C.forestDark,
-              }}
-            >
-              P+I Balloon
-            </h3>
-            <div className="text-xs" style={{ color: C.mutedText }}>
-              Disciplined principal repayment
-            </div>
-          </div>
-
-          <div className="p-4 sm:p-5 flex-1 space-y-3">
-            <div className="pb-2" style={{ borderBottom: `1px dashed ${C.cardBorder}` }}>
-              <div
-                className="text-[10px] uppercase tracking-wider font-medium mb-1"
-                style={{ color: C.mutedText }}
-              >
-                Cash-out at disbursement
-              </div>
-              <div
-                className="tabular-nums leading-none"
-                style={{
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "22px",
-                  color: C.forest,
-                  fontWeight: 500,
-                }}
-              >
-                {fmt(cashoutBalloon)}
-              </div>
-            </div>
-            <div className="pb-2" style={{ borderBottom: `1px dashed ${C.cardBorder}` }}>
-              <div
-                className="text-[10px] uppercase tracking-wider font-medium mb-1"
-                style={{ color: C.mutedText }}
-              >
-                Monthly servicing
-              </div>
-              <div
-                className="tabular-nums leading-none"
-                style={{
-                  fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "22px",
-                  color: C.forestDark,
-                }}
-              >
-                {fmt(balloonMonthly)}
-              </div>
-              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
-                P + I
-              </div>
-            </div>
             <div>
-              <div
-                className="text-[10px] uppercase tracking-wider font-medium mb-1"
-                style={{ color: C.mutedText }}
-              >
-                Tenure
+              <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                <span
+                  className="text-[10px] uppercase tracking-wider font-semibold"
+                  style={{ color: C.forest }}
+                >
+                  Option B
+                </span>
+                <span
+                  className="px-2 py-0.5 rounded-full text-[9px] uppercase tracking-wider font-semibold"
+                  style={{
+                    background: "rgba(59,98,85,0.12)",
+                    color: C.forest,
+                    border: `1px solid ${C.forest}40`,
+                  }}
+                >
+                  More structured
+                </span>
               </div>
-              <div
-                className="tabular-nums leading-none"
+              <h3
+                className="font-normal"
                 style={{
                   fontFamily: "'Playfair Display', Georgia, serif",
-                  fontSize: "18px",
+                  fontSize: "16px",
                   color: C.forestDark,
+                  lineHeight: 1.1,
                 }}
               >
-                5 years
-              </div>
-              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>
-                balloon
-              </div>
+                P+I Balloon
+              </h3>
+            </div>
+            <div className="text-[10px] text-right" style={{ color: C.mutedText, lineHeight: 1.3 }}>
+              Disciplined<br/>principal repayment
             </div>
           </div>
 
-          <div
-            className="px-4 sm:px-5 py-3"
-            style={{
-              backgroundColor: C.lightBg + "B3",
-              borderTop: `1px solid ${C.cardBorder}`,
-            }}
-          >
-            <div
-              className="text-[11px] font-medium mb-1"
-              style={{ color: C.forestDark }}
-            >
-              Why pick P+I Balloon
+          {/* 2x2 Metrics Grid */}
+          <div className="grid grid-cols-2">
+            <div className="px-3.5 py-2.5" style={{ borderRight: `1px solid ${C.cardBorder}`, borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Total Loan Amount</div>
+              <div className="tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "18px", color: C.forestDark }}>{fmt(applicableLoanBalloon)}</div>
             </div>
-            <p className="text-xs leading-relaxed" style={{ color: C.bodyText }}>
-              Best if you'd rather chip away at the debt steadily. Each payment builds equity,
-              leaving a smaller balloon at year 5 and a stronger refinancing position.
+            <div className="px-3.5 py-2.5" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Cash Released</div>
+              <div className="tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "18px", color: C.forest, fontWeight: 500 }}>{fmt(cashoutBalloon)}</div>
+            </div>
+            <div className="px-3.5 py-2.5" style={{ borderRight: `1px solid ${C.cardBorder}`, borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Monthly Payment</div>
+              <div className="tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "18px", color: C.forestDark }}>{fmt(balloonMonthly)}</div>
+              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>Principal &amp; Interest</div>
+            </div>
+            <div className="px-3.5 py-2.5" style={{ borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Tenure</div>
+              <div className="leading-tight mt-0.5" style={{ fontSize: "14px", color: C.forestDark, fontWeight: 500 }}>5 years</div>
+              <div className="text-[10px] mt-0.5" style={{ color: C.mutedText }}>balloon</div>
+            </div>
+          </div>
+
+          {/* Interest Rate row */}
+          <div className="grid grid-cols-2">
+            <div className="px-3.5 py-2.5" style={{ background: C.lightBg, borderRight: `1px solid ${C.cardBorder}`, borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Interest Rate</div>
+              <div className="tabular-nums leading-tight mt-0.5" style={{ fontFamily: "'Playfair Display', Georgia, serif", fontSize: "16px", color: C.forestDark, fontWeight: 500 }}>{fmtPct(interestRate)} p.a.</div>
+            </div>
+            <div className="px-3.5 py-2.5" style={{ background: C.lightBg, borderBottom: `1px solid ${C.cardBorder}` }}>
+              <div className="text-[9px] uppercase tracking-wider font-medium" style={{ color: C.mutedText }}>Structure</div>
+              <div className="leading-tight mt-0.5" style={{ fontSize: "13px", color: C.forestDark, fontWeight: 500 }}>Amortised P+I</div>
+            </div>
+          </div>
+
+          {/* Why pick */}
+          <div className="px-4 py-3 flex-1" style={{ background: C.lightBg + "B3" }}>
+            <div className="text-[10px] uppercase tracking-wider font-medium mb-1" style={{ color: C.mutedText }}>Why pick P+I Balloon</div>
+            <p className="text-xs leading-relaxed" style={{ color: C.bodyText, margin: 0 }}>
+              Gradual principal reduction with a stronger position for refinancing.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Fees collapsible — de-emphasised */}
+      {/* Fees collapsible, de-emphasised */}
       <div
         className="rounded-xl overflow-hidden"
         style={{
@@ -1905,7 +1801,7 @@ function CompareView({
             fontFamily: "inherit",
           }}
         >
-          {compareFeesOpen ? "Hide fees & charges ▴" : "Show fees & charges ▾"}
+          {compareFeesOpen ? "Hide fees and charges ▴" : "Show fees and charges ▾"}
         </button>
         {compareFeesOpen && (
           <div
@@ -2013,7 +1909,7 @@ function SnapshotStep({
         </p>
       </div>
 
-      {/* THE SNAPSHOT CARD — designed to fit one mobile screen */}
+      {/* THE SNAPSHOT CARD, designed to fit one mobile screen */}
       <div
         className="rounded-2xl bg-white p-5 sm:p-6 mx-auto"
         style={{ border: `1px solid ${C.cardBorder}`, maxWidth: "420px" }}
@@ -2040,12 +1936,12 @@ function SnapshotStep({
         {/* Hero numbers */}
         <div className="space-y-2.5 mb-4">
           <SnapshotHeroItem
-            label="Eligible Loan Amount"
+            label="Total Loan Amount"
             value={fmt(aLoan)}
             primary
           />
-          <SnapshotHeroItem label="Cash-out at disbursement" value={fmt(cashout)} />
-          <SnapshotHeroItem label="Monthly payment" value={fmt(monthly)} />
+          <SnapshotHeroItem label="Cash Released at disbursement" value={fmt(cashout)} />
+          <SnapshotHeroItem label="Monthly Payment" value={fmt(monthly)} />
         </div>
 
         {/* Terms */}
@@ -2190,9 +2086,9 @@ function NextStepsStep({
         "- CPF used: $[amount, or 'none']",
         "",
         "INDICATIVE FROM VUCALC+",
-        `- Estimated loan: ${fmt(aLoan)}`,
-        `- Cashout: ${fmt(cashout)}`,
-        `- Monthly: ${fmt(monthly)} (${structLabel})`,
+        `- Total Loan Amount: ${fmt(aLoan)}`,
+        `- Cash Released: ${fmt(cashout)}`,
+        `- Monthly Payment: ${fmt(monthly)} (${structLabel})`,
         "",
         "Could you share a confirmed quote? Thanks.",
       ].join("\n");
@@ -2214,9 +2110,9 @@ function NextStepsStep({
         "- CPF used: $[amount, or 'none']",
         "",
         "INDICATIVE FROM VUCALC+",
-        `- Estimated loan: ${fmt(aLoan)}`,
-        `- Cashout: ${fmt(cashout)}`,
-        `- Monthly: ${fmt(monthly)} (${structLabel})`,
+        `- Total Loan Amount: ${fmt(aLoan)}`,
+        `- Cash Released: ${fmt(cashout)}`,
+        `- Monthly Payment: ${fmt(monthly)} (${structLabel})`,
         "",
         "Could you walk me through next steps?",
       ].join("\n");
@@ -2279,7 +2175,7 @@ function NextStepsStep({
         </button>
       </div>
 
-      {/* Simple contact line — phone number kept hidden */}
+      {/* Simple contact line, phone number kept hidden */}
       <div
         className="rounded-lg px-4 py-3 text-sm flex flex-wrap items-center gap-2"
         style={{
@@ -2380,7 +2276,7 @@ function NextStepsStep({
         </div>
       </div>
 
-      {/* BOTTOM WhatsApp share panel — for users who scrolled past the top */}
+      {/* BOTTOM WhatsApp share panel, for users who scrolled past the top */}
       <WhatsappPanel
         eyebrow="Ready to send?"
         title="One tap to message Vu"
@@ -2837,7 +2733,7 @@ function PercentInput({ label, value, onChange, min, max, error }) {
       return;
     }
     if (min != null && parsed < min) parsed = min;
-    // Skip max-clamping when error prop is set — caller is using the raw value
+    // Skip max-clamping when error prop is set, caller is using the raw value
     // to show a "value exceeded" error message.
     if (!error && max != null && parsed > max) parsed = max;
     onChange(parsed);
@@ -2877,7 +2773,7 @@ function PercentInput({ label, value, onChange, min, max, error }) {
             setRawInput(v);
 
             // Live-update the underlying value only if it's a valid parseable number
-            // (so the linked field — e.g. loan amount ↔ LTV — stays in sync while typing).
+            // (so the linked field, e.g. loan amount and LTV, stays in sync while typing).
             // For fields with `error` prop (e.g. LTV with hard cap), let the value
             // exceed the max so the parent can show an error state. For other fields
             // (e.g. Processing Fee with a 3% cap), clamp silently as before.
