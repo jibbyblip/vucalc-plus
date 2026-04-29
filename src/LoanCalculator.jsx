@@ -2128,10 +2128,10 @@ function NextStepsStep({
 
   const docs = [
     "Details of the property, including address, size, and tenure",
-    "Names of the borrower and personal guarantor(s), so we can run ACRA and EIS searches",
+    "Names of the borrower and personal guarantor(s)",
     "Copy of NRIC for each guarantor",
     "Latest 2 years' financial reports or management accounts (FY2024 and FY2025)",
-    "Latest 3 months' company bank statements (Jan to Mar 2026)",
+    "Latest 3 months' company bank statements (Feb to April 2026)",
   ];
 
   const docsWithLinks = [
@@ -2141,15 +2141,15 @@ function NextStepsStep({
       href: "https://mytax.iras.gov.sg/ESVWeb/default.aspx",
     },
     {
-      text: "Latest CBS Report for each guarantor (pulled within this month)",
+      text: "Latest CBS Report for each guarantor (must be done in the current month)",
       linkText: "Purchase from Credit Bureau Singapore",
-      href: "https://www.creditbureau.com.sg/buy-my-credit-report.html",
+      href: "https://www.creditbureau.com.sg/",
     },
     {
-      text: "Latest loan statement(s) for the property to be financed (March 2026 statement) or Letter of Offer(s)",
+      text: "Latest loan statement(s) for the property to be financed (April 2026 statement) or Letter of Offer(s)",
     },
     {
-      text: "Latest CPF statement for the property to be financed",
+      text: "Latest CPF statement for the property to be financed (must be done in the current month)",
       linkText: "How to retrieve your CPF statement",
       href: "https://www.cpf.gov.sg/service/article/how-do-i-view-my-cpf-yearly-statement-of-account",
     },
@@ -2268,35 +2268,11 @@ function NextStepsStep({
               A visit to the property
             </h3>
             <p className="text-sm leading-relaxed" style={{ color: C.bodyText }}>
-              Once we're aligned on the structure, kindly arrange a time for me and my management to
-              visit the pledged property together. It's a short, standard part of the process, and a
-              nice chance to meet you in person.
+              Once we're aligned on the structure, we'll arrange a short site visit to the property
+              with my management. It's a standard step and a good chance to meet in person.
             </p>
           </div>
         </div>
-      </div>
-
-      {/* BOTTOM WhatsApp share panel, for users who scrolled past the top */}
-      <WhatsappPanel
-        eyebrow="Ready to send?"
-        title="One tap to message Vu"
-        subtitle="Same templates, in case you scrolled past the top."
-        topSubBroker="Send broker template via WhatsApp."
-        topSubClient="Send client template via WhatsApp."
-        onWhatsapp={openWhatsapp}
-      />
-
-      {/* Closing reminder */}
-      <div
-        className="rounded-lg p-4 text-sm leading-relaxed"
-        style={{
-          backgroundColor: C.bone + "80",
-          border: `1px solid ${C.cardBorder}`,
-          color: C.mutedText,
-        }}
-      >
-        All figures in this proposal are indicative. Final terms are subject to credit approval and
-        documentation. If anything here needs clarifying, just reach out.
       </div>
     </div>
   );
