@@ -66,6 +66,17 @@ export default function LoanCalculator() {
   const [showSchedule, setShowSchedule] = useState(null);
   const [compareFeesOpen, setCompareFeesOpen] = useState(false);
 
+  // Per-structure manual override of the Total Loan Amount.
+  // Empty string = use formula (Applicable Loan). Any positive number = override.
+  const [iOnlyOverride, setIOnlyOverride] = useState("");
+  const [balloonOverride, setBalloonOverride] = useState("");
+
+  // Auto-close any open schedule when the user changes which structure they're
+  // looking at. Otherwise the wrong schedule could stay visible.
+  useEffect(() => {
+    setShowSchedule(null);
+  }, [selectedStructure]);
+
   const n = (v) => (v == null || v === "" || isNaN(v) ? 0 : Number(v));
   const round2 = (x) => Math.round(x * 100) / 100;
 
@@ -110,90 +121,148 @@ export default function LoanCalculator() {
   const loan = effectiveProposedLoan;
 
   // Per-structure applicable loan = proposed loan minus structure's CPF projection.
-  // This is what actually gets disbursed.
+  // This is the formula-driven figure (no override).
   const applicableLoanIOnly = Math.max(0, loan - cpfIOnly);
   const applicableLoanBalloon = Math.max(0, loan - cpfBalloon);
 
-  // Per-structure processing fee (capped at 3%, calculated on applicable loan)
+  // Per-structure EFFECTIVE loan: if user typed an override on the structure card,
+  // use that. Otherwise fall back to the formula above. This is the figure used for
+  // monthly payment, schedule, balloon balance, Cash Released, and Snapshot.
+  const effectiveLoanIOnly =
+    n(iOnlyOverride) > 0 ? n(iOnlyOverride) : applicableLoanIOnly;
+  const effectiveLoanBalloon =
+    n(balloonOverride) > 0 ? n(balloonOverride) : applicableLoanBalloon;
+
+  // Per-structure processing fee (capped at 3%, calculated on effective loan)
   const cappedProcessingFeePct = Math.min(n(processingFeePct), 0.03);
-  const processingFeeIOnly = round2(applicableLoanIOnly * cappedProcessingFeePct);
-  const processingFeeBalloon = round2(applicableLoanBalloon * cappedProcessingFeePct);
+  const processingFeeIOnly = round2(effectiveLoanIOnly * cappedProcessingFeePct);
+  const processingFeeBalloon = round2(effectiveLoanBalloon * cappedProcessingFeePct);
 
   const monthlyRate = n(interestRate) / 12;
 
   // Per-structure monthly servicing amounts
-  const iOnlyMonthly = round2(applicableLoanIOnly * monthlyRate);
-  const iOnlyEndOfTerm = applicableLoanIOnly;
+  const iOnlyMonthly = round2(effectiveLoanIOnly * monthlyRate);
+  // I-Only month 12 = full principal + month-12 interest (matches schedule's final row).
+  const iOnlyEndOfTerm = round2(effectiveLoanIOnly + iOnlyMonthly);
 
   const amortMonths = n(amortYears) * 12;
   const balloonMonths = BALLOON_YEAR * 12;
 
-  const balloonMonthly = round2(
+  // Standard P+I payment, computed at full float precision.
+  // We carry this unrounded value into schedule calcs so cumulative rounding
+  // drift matches ORIX/CQ banking systems (which compute internally at high
+  // precision and round only on display).
+  const balloonMonthlyRaw =
     monthlyRate === 0 || amortMonths === 0
-      ? applicableLoanBalloon / (amortMonths || 1)
-      : (applicableLoanBalloon * monthlyRate) /
-        (1 - Math.pow(1 + monthlyRate, -amortMonths))
-  );
+      ? effectiveLoanBalloon / (amortMonths || 1)
+      : (effectiveLoanBalloon * monthlyRate) /
+        (1 - Math.pow(1 + monthlyRate, -amortMonths));
+  const balloonMonthly = round2(balloonMonthlyRaw);
 
+  // Balloon payoff at month 60:
+  //   - residual balance after 59 standard P+I payments (not 60)
+  //   - PLUS interest accrued during month 60 on that residual
+  // This matches the schedule's month-60 row, which treats month 60 as the
+  // full payoff: residual principal + final-month interest.
+  const balloonMonthsMinusOne = balloonMonths - 1;
+  // Use the unrounded payment for the closed-form residual so this matches the
+  // iterative schedule above (which now also carries unrounded values).
+  const residualAfterPenultimate =
+    monthlyRate === 0 || amortMonths === 0
+      ? effectiveLoanBalloon - balloonMonthlyRaw * balloonMonthsMinusOne
+      : effectiveLoanBalloon * Math.pow(1 + monthlyRate, balloonMonthsMinusOne) -
+        balloonMonthlyRaw *
+          ((Math.pow(1 + monthlyRate, balloonMonthsMinusOne) - 1) / monthlyRate);
   const balloonEndBalance = round2(
     monthlyRate === 0
-      ? applicableLoanBalloon - balloonMonthly * balloonMonths
-      : applicableLoanBalloon * Math.pow(1 + monthlyRate, balloonMonths) -
-          balloonMonthly *
-            ((Math.pow(1 + monthlyRate, balloonMonths) - 1) / monthlyRate)
+      ? residualAfterPenultimate
+      : residualAfterPenultimate * (1 + monthlyRate)
   );
 
-  // Per-structure cashout = applicable loan − outstanding − processing − fire insurance
+  // Per-structure cashout = effective loan − outstanding − processing − fire insurance
   const cashoutIOnly = round2(
-    applicableLoanIOnly - n(outstanding) - processingFeeIOnly - n(fireInsurance)
+    effectiveLoanIOnly - n(outstanding) - processingFeeIOnly - n(fireInsurance)
   );
   const cashoutBalloon = round2(
-    applicableLoanBalloon - n(outstanding) - processingFeeBalloon - n(fireInsurance)
+    effectiveLoanBalloon - n(outstanding) - processingFeeBalloon - n(fireInsurance)
   );
 
   // Single-structure view convenience: pick based on selectedStructure
   const isBalloon = selectedStructure === "balloon";
-  const applicableLoan = isBalloon ? applicableLoanBalloon : applicableLoanIOnly;
+  const applicableLoan = isBalloon ? effectiveLoanBalloon : effectiveLoanIOnly;
   const processingFee = isBalloon ? processingFeeBalloon : processingFeeIOnly;
   const cashout = isBalloon ? cashoutBalloon : cashoutIOnly;
   const cpfForStructure = isBalloon ? cpfBalloon : cpfIOnly;
 
   const iOnlySchedule = useMemo(() => {
     const rows = [];
+    // Month 0 disbursement row: loan goes out, no payment in arrears.
+    rows.push({
+      month: 0,
+      begin: effectiveLoanIOnly,
+      interest: 0,
+      principal: 0,
+      total: 0,
+      end: effectiveLoanIOnly,
+    });
     for (let m = 1; m <= 12; m++) {
+      const principal = m === 12 ? effectiveLoanIOnly : 0;
       rows.push({
         month: m,
-        begin: applicableLoanIOnly,
+        begin: effectiveLoanIOnly,
         interest: iOnlyMonthly,
-        principal: m === 12 ? applicableLoanIOnly : 0,
-        end: m === 12 ? 0 : applicableLoanIOnly,
+        principal,
+        total: round2(iOnlyMonthly + principal),
+        end: m === 12 ? 0 : effectiveLoanIOnly,
       });
     }
     return rows;
-  }, [applicableLoanIOnly, iOnlyMonthly]);
+  }, [effectiveLoanIOnly, iOnlyMonthly]);
 
   const balloonSchedule = useMemo(() => {
     const rows = [];
-    let balance = applicableLoanBalloon;
+    // Month 0 disbursement row.
+    rows.push({
+      month: 0,
+      begin: effectiveLoanBalloon,
+      interest: 0,
+      principal: 0,
+      total: 0,
+      end: effectiveLoanBalloon,
+    });
+    // We carry both the BALANCE and the P+I PAYMENT at full float precision
+    // through the loop. Each row stores rounded display values. This matches
+    // ORIX/CQ banking systems which compute on unrounded values and round only
+    // on display. Without this, cumulative rounding drift puts the final
+    // balloon row $0.27 off from ORIX over 60 months.
+    let balance = effectiveLoanBalloon;
     for (let m = 1; m <= balloonMonths; m++) {
-      const interest = round2(balance * monthlyRate);
-      let principal = round2(balloonMonthly - interest);
-      let end = round2(balance - principal);
+      const interestRaw = balance * monthlyRate;
+      const interest = round2(interestRaw);
+      let principalRaw = balloonMonthlyRaw - interestRaw;
+      let endRaw = balance - principalRaw;
+      let principalDisplay = round2(principalRaw);
+      let endDisplay = round2(endRaw);
       if (m === balloonMonths) {
-        principal = balance;
-        end = 0;
+        // Final month payoff: full residual + month-60 interest on that residual.
+        principalDisplay = round2(balance);
+        endDisplay = 0;
+        endRaw = 0;
       }
+      const total = round2(interest + principalDisplay);
       rows.push({
         month: m,
         begin: round2(balance),
         interest,
-        principal: round2(principal),
-        end: round2(end),
+        principal: principalDisplay,
+        total,
+        end: endDisplay,
       });
-      balance = end;
+      // Carry the unrounded end-balance forward for next month's interest calc.
+      balance = endRaw;
     }
     return rows;
-  }, [applicableLoanBalloon, monthlyRate, balloonMonths, balloonMonthly]);
+  }, [effectiveLoanBalloon, monthlyRate, balloonMonths, balloonMonthlyRaw]);
 
   const fmt = (x) => {
     if (x == null || x === "" || isNaN(x)) return "";
@@ -316,6 +385,12 @@ export default function LoanCalculator() {
             applicableLoan={applicableLoan}
             applicableLoanIOnly={applicableLoanIOnly}
             applicableLoanBalloon={applicableLoanBalloon}
+            effectiveLoanIOnly={effectiveLoanIOnly}
+            effectiveLoanBalloon={effectiveLoanBalloon}
+            iOnlyOverride={iOnlyOverride}
+            setIOnlyOverride={setIOnlyOverride}
+            balloonOverride={balloonOverride}
+            setBalloonOverride={setBalloonOverride}
             cpfPrincipal={n(cpfPrincipal)}
             cpfIOnly={cpfIOnly}
             cpfBalloon={cpfBalloon}
@@ -358,8 +433,11 @@ export default function LoanCalculator() {
         {step === "snapshot" && (
           <SnapshotStep
             selectedStructure={selectedStructure}
-            applicableLoanIOnly={applicableLoanIOnly}
-            applicableLoanBalloon={applicableLoanBalloon}
+            propertyValue={n(propertyValue)}
+            applicableLoanIOnly={effectiveLoanIOnly}
+            applicableLoanBalloon={effectiveLoanBalloon}
+            cpfIOnly={cpfIOnly}
+            cpfBalloon={cpfBalloon}
             cashoutIOnly={cashoutIOnly}
             cashoutBalloon={cashoutBalloon}
             iOnlyMonthly={iOnlyMonthly}
@@ -371,6 +449,7 @@ export default function LoanCalculator() {
             valuationFee={n(valuationFee)}
             interestRate={n(interestRate)}
             fmt={fmt}
+            fmtPct={fmtPct}
             onBack={() => goToStep("results")}
             onProceed={() => goToStep("next-steps")}
           />
@@ -380,8 +459,8 @@ export default function LoanCalculator() {
           <NextStepsStep
             phone={VU_PHONE}
             selectedStructure={selectedStructure}
-            applicableLoanIOnly={applicableLoanIOnly}
-            applicableLoanBalloon={applicableLoanBalloon}
+            applicableLoanIOnly={effectiveLoanIOnly}
+            applicableLoanBalloon={effectiveLoanBalloon}
             cashoutIOnly={cashoutIOnly}
             cashoutBalloon={cashoutBalloon}
             iOnlyMonthly={iOnlyMonthly}
@@ -1042,6 +1121,12 @@ function ResultsStep({
   applicableLoan,
   applicableLoanIOnly,
   applicableLoanBalloon,
+  effectiveLoanIOnly,
+  effectiveLoanBalloon,
+  iOnlyOverride,
+  setIOnlyOverride,
+  balloonOverride,
+  setBalloonOverride,
   cpfPrincipal,
   cpfIOnly,
   cpfBalloon,
@@ -1081,6 +1166,16 @@ function ResultsStep({
   const showBalloon = selectedStructure === "balloon";
   const hasCpf = cpfPrincipal > 0;
 
+  // Track whether the override is active for the current structure.
+  // When override is on, hide the CPF deduction block (its breakdown wouldn't
+  // make sense, since the override replaces the formula).
+  const safeN = (v) => (v == null || v === "" || isNaN(v) ? 0 : Number(v));
+  const structureOverrideActive = showIOnly
+    ? safeN(iOnlyOverride) > 0
+    : showBalloon
+    ? safeN(balloonOverride) > 0
+    : false;
+
   const animCashout = useAnimatedValue(cashout, 1200);
 
   const title = isCompare
@@ -1116,8 +1211,8 @@ function ResultsStep({
         </div>
       </div>
 
-      {/* CPF DEDUCTION BLOCK, single-structure only (hidden on Compare both) */}
-      {hasCpf && !isCompare && (
+      {/* CPF DEDUCTION BLOCK, single-structure only (hidden on Compare both, also hidden when override is active) */}
+      {hasCpf && !isCompare && !structureOverrideActive && (
         <div
           className="rounded-xl p-4 sm:p-5"
           style={{
@@ -1164,8 +1259,8 @@ function ResultsStep({
       {/* COMPARE VIEW or SINGLE VIEW */}
       {isCompare ? (
         <CompareView
-          applicableLoanIOnly={applicableLoanIOnly}
-          applicableLoanBalloon={applicableLoanBalloon}
+          applicableLoanIOnly={effectiveLoanIOnly}
+          applicableLoanBalloon={effectiveLoanBalloon}
           cashoutIOnly={cashoutIOnly}
           cashoutBalloon={cashoutBalloon}
           iOnlyMonthly={iOnlyMonthly}
@@ -1345,11 +1440,14 @@ function ResultsStep({
                 icon={<ClockIcon color={C.sageDark} size={22} />}
                 monthly={iOnlyMonthly}
                 endOfTerm={iOnlyEndOfTerm}
-                endOfTermLabel="Principal due at end of year 1"
+                endOfTermLabel="Final payment due at year 1"
                 description="Interest-only monthly payments keep your outgoings light. The full principal is due when the term ends."
                 onShowSchedule={() => setShowSchedule(showSchedule === "ionly" ? null : "ionly")}
                 scheduleOpen={showSchedule === "ionly"}
                 fmt={fmt}
+                override={iOnlyOverride}
+                setOverride={setIOnlyOverride}
+                formulaLoan={applicableLoanIOnly}
                 rationale={
                   <>
                     <p className="mb-2" style={{ color: C.forestDark, fontWeight: 500 }}>
@@ -1370,11 +1468,14 @@ function ResultsStep({
                 icon={<TreeIcon color={C.forest} size={22} />}
                 monthly={balloonMonthly}
                 endOfTerm={balloonEndBalance}
-                endOfTermLabel="Balloon due at end of year 5"
+                endOfTermLabel="Final payment due at year 5"
                 description={`Principal + Interest monthly on a ${amortYears}-year schedule. Each payment reduces principal. The remaining balance is due as a balloon at year 5.`}
                 onShowSchedule={() => setShowSchedule(showSchedule === "balloon" ? null : "balloon")}
                 scheduleOpen={showSchedule === "balloon"}
                 fmt={fmt}
+                override={balloonOverride}
+                setOverride={setBalloonOverride}
+                formulaLoan={applicableLoanBalloon}
                 extraInput={
                   <div className="pt-3" style={{ borderTop: `1px dashed ${C.cardBorder}` }}>
                     <label className="block">
@@ -1866,8 +1967,11 @@ function CompareView({
 // =========================================================
 function SnapshotStep({
   selectedStructure,
+  propertyValue,
   applicableLoanIOnly,
   applicableLoanBalloon,
+  cpfIOnly,
+  cpfBalloon,
   cashoutIOnly,
   cashoutBalloon,
   iOnlyMonthly,
@@ -1879,15 +1983,21 @@ function SnapshotStep({
   valuationFee,
   interestRate,
   fmt,
+  fmtPct,
   onBack,
   onProceed,
 }) {
   // For "Compare both", default to Interest-Only view in the snapshot
   const isBalloon = selectedStructure === "balloon";
   const aLoan = isBalloon ? applicableLoanBalloon : applicableLoanIOnly;
+  const cpfForStructure = isBalloon ? cpfBalloon : cpfIOnly;
   const cashout = isBalloon ? cashoutBalloon : cashoutIOnly;
   const monthly = isBalloon ? balloonMonthly : iOnlyMonthly;
   const procFee = isBalloon ? processingFeeBalloon : processingFeeIOnly;
+  // LTV = (Applicable Loan + CPF projection for this structure) / Property Value.
+  // This is the gross LTV the bank sees, including CPF redemption.
+  const ltvAfterCpf =
+    propertyValue > 0 ? (aLoan + cpfForStructure) / propertyValue : 0;
   const structureLabel = isBalloon
     ? "P+I Balloon · Year 5"
     : selectedStructure === "both"
@@ -1935,6 +2045,8 @@ function SnapshotStep({
 
         {/* Hero numbers */}
         <div className="space-y-2.5 mb-4">
+          <SnapshotHeroItem label="Valuation" value={fmt(propertyValue)} />
+          <SnapshotHeroItem label="LTV" value={fmtPct(ltvAfterCpf)} />
           <SnapshotHeroItem
             label="Total Loan Amount"
             value={fmt(aLoan)}
@@ -2388,12 +2500,17 @@ function DocItem({ num, text, linkText, href, isLast }) {
 function StructureCard({
   title, subtitle, accent, icon, monthly, endOfTerm, endOfTermLabel,
   description, onShowSchedule, scheduleOpen, fmt, extraInput, rationale,
+  override, setOverride, formulaLoan, totalLoanLabel,
 }) {
   const accentMap = {
     sage: { top: C.sage, color: C.sageDark, bg: C.mint + "30" },
     forest: { top: C.forest, color: C.forest, bg: C.mint + "50" },
   };
   const a = accentMap[accent];
+
+  // Local input state so typing feels responsive on mobile (avoid re-render lag).
+  const showOverrideUI = setOverride !== undefined;
+  const overrideActive = override !== "" && Number(override) > 0;
 
   return (
     <div
@@ -2445,6 +2562,60 @@ function StructureCard({
           {description}
         </p>
 
+        {showOverrideUI && (
+          <div
+            className="pt-3"
+            style={{
+              borderTop: `1px dashed ${C.cardBorder}`,
+            }}
+          >
+            <div
+              className="flex items-center justify-between gap-2 mb-1.5"
+            >
+              <label
+                className="text-xs uppercase tracking-wider"
+                style={{ color: C.mutedText }}
+              >
+                {totalLoanLabel || "Override loan amount"}
+              </label>
+              {overrideActive && (
+                <button
+                  type="button"
+                  onClick={() => setOverride("")}
+                  className="text-[10px] uppercase tracking-wider transition hover:opacity-70"
+                  style={{ color: C.forest }}
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={override}
+              onChange={(e) => {
+                // Allow only digits and a single decimal point.
+                const raw = e.target.value.replace(/[^\d.]/g, "");
+                setOverride(raw);
+              }}
+              placeholder={`Default: ${fmt(formulaLoan)}`}
+              className="w-full px-3 py-2 rounded-md text-sm tabular-nums"
+              style={{
+                border: `1px solid ${overrideActive ? a.top : C.cardBorder}`,
+                backgroundColor: overrideActive ? a.bg : "white",
+                color: C.forestDark,
+                fontSize: "16px", // prevent iOS zoom
+                outline: "none",
+              }}
+            />
+            <p className="text-[10px] mt-1.5 leading-relaxed" style={{ color: C.mutedText }}>
+              {overrideActive
+                ? "Override active. Monthly, schedule, and Cash Released all recalculate from this amount."
+                : "Leave blank to use the formula-driven amount above."}
+            </p>
+          </div>
+        )}
+
         {extraInput}
 
         {rationale && (
@@ -2469,6 +2640,8 @@ function StructureCard({
 }
 
 function ScheduleTable({ title, rows, fmt, onClose }) {
+  // Identify the final row (last in array) so we can highlight it.
+  const finalIdx = rows.length - 1;
   return (
     <div
       className="bg-white rounded-xl overflow-hidden"
@@ -2497,7 +2670,7 @@ function ScheduleTable({ title, rows, fmt, onClose }) {
       </div>
       {/* Horizontal scroll on mobile so columns don't get squeezed */}
       <div className="max-h-96 overflow-y-auto overflow-x-auto">
-        <table className="w-full text-xs sm:text-sm" style={{ minWidth: "560px" }}>
+        <table className="w-full text-xs sm:text-sm" style={{ minWidth: "640px" }}>
           <thead
             className="text-[10px] sm:text-xs uppercase tracking-wider sticky top-0"
             style={{ backgroundColor: C.bone, color: C.mutedText }}
@@ -2507,21 +2680,70 @@ function ScheduleTable({ title, rows, fmt, onClose }) {
               <th className="text-right py-2 px-3 sm:px-4 font-medium">Beginning</th>
               <th className="text-right py-2 px-3 sm:px-4 font-medium">Interest</th>
               <th className="text-right py-2 px-3 sm:px-4 font-medium">Principal</th>
+              <th className="text-right py-2 px-3 sm:px-4 font-medium">Total Payment</th>
               <th className="text-right py-2 px-3 sm:px-4 font-medium">Ending</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.month} style={{ borderTop: `1px solid ${C.cardBorder}40` }}>
-                <td className="py-1.5 px-3 sm:px-4" style={{ color: C.mutedText }}>
-                  {r.month}
-                </td>
-                <td className="py-1.5 px-3 sm:px-4 text-right tabular-nums">{fmt(r.begin)}</td>
-                <td className="py-1.5 px-3 sm:px-4 text-right tabular-nums">{fmt(r.interest)}</td>
-                <td className="py-1.5 px-3 sm:px-4 text-right tabular-nums">{fmt(r.principal)}</td>
-                <td className="py-1.5 px-3 sm:px-4 text-right tabular-nums">{fmt(r.end)}</td>
-              </tr>
-            ))}
+            {rows.map((r, idx) => {
+              const isDisbursement = r.month === 0;
+              const isFinal = idx === finalIdx;
+              const rowStyle = isDisbursement
+                ? { backgroundColor: C.sand + "33" }
+                : isFinal
+                ? { backgroundColor: C.mint + "55" }
+                : {};
+              const cellWeight = isFinal ? 600 : 400;
+              return (
+                <tr
+                  key={r.month}
+                  style={{
+                    borderTop: `1px solid ${C.cardBorder}40`,
+                    ...rowStyle,
+                  }}
+                >
+                  <td
+                    className="py-1.5 px-3 sm:px-4"
+                    style={{
+                      color: isDisbursement ? C.sandDark : C.mutedText,
+                      fontWeight: isDisbursement || isFinal ? 600 : 400,
+                    }}
+                  >
+                    {isDisbursement ? "0 (disbursement)" : r.month}
+                  </td>
+                  <td
+                    className="py-1.5 px-3 sm:px-4 text-right tabular-nums"
+                    style={{ fontWeight: cellWeight }}
+                  >
+                    {fmt(r.begin)}
+                  </td>
+                  <td
+                    className="py-1.5 px-3 sm:px-4 text-right tabular-nums"
+                    style={{ fontWeight: cellWeight }}
+                  >
+                    {isDisbursement ? "—" : fmt(r.interest)}
+                  </td>
+                  <td
+                    className="py-1.5 px-3 sm:px-4 text-right tabular-nums"
+                    style={{ fontWeight: cellWeight }}
+                  >
+                    {isDisbursement ? "—" : fmt(r.principal)}
+                  </td>
+                  <td
+                    className="py-1.5 px-3 sm:px-4 text-right tabular-nums"
+                    style={{ fontWeight: isFinal ? 700 : cellWeight, color: isFinal ? C.forestDark : "inherit" }}
+                  >
+                    {isDisbursement ? "—" : fmt(r.total)}
+                  </td>
+                  <td
+                    className="py-1.5 px-3 sm:px-4 text-right tabular-nums"
+                    style={{ fontWeight: cellWeight }}
+                  >
+                    {fmt(r.end)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
